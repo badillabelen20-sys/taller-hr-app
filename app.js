@@ -196,6 +196,25 @@ function countPeriodo({rubro, year, month}={}){
     return true;
   }).length;
 }
+// Costo de la mercadería vendida (usa el costo cargado en cada producto)
+function costoPeriodo({rubro, year, month}={}){
+  let c=0;
+  DB.ventas.forEach(v=>{
+    if(rubro && v.rubro!==rubro) return;
+    const d=new Date(v.fecha+'T00:00:00');
+    if(year!=null && d.getFullYear()!==year) return;
+    if(month!=null && d.getMonth()!==month) return;
+    const src=(v.insumos&&v.insumos.length)?v.insumos:(v.items||[]);
+    src.forEach(it=>{ const p=DB.productos.find(x=>x.nombre===it.nombre); if(p) c+=(+p.costo||0)*(+it.cantidad||0); });
+  });
+  return c;
+}
+function gastosPeriodo({year, month}={}){
+  return DB.gastos.filter(g=>{ const d=new Date(g.fecha+'T00:00:00');
+    if(year!=null && d.getFullYear()!==year) return false;
+    if(month!=null && d.getMonth()!==month) return false; return true;
+  }).reduce((s,g)=>s+(+g.monto||0),0);
+}
 
 /* ================= Router / navegación ================= */
 let current = 'inicio';
@@ -613,6 +632,14 @@ function viewResumen(){
   const anioTot=anioTurbo+anioLubri;
   const tPct = anioTot? Math.round(anioTurbo/anioTot*100):0;
 
+  // rentabilidad
+  const costoTurbo=costoPeriodo({rubro:'turbo',year:y});
+  const costoLubri=costoPeriodo({rubro:'lubricentro',year:y});
+  const brutoTurbo=anioTurbo-costoTurbo, brutoLubri=anioLubri-costoLubri, brutoTot=brutoTurbo+brutoLubri;
+  const gastosAnio=gastosPeriodo({year:y});
+  const netaTot=brutoTot-gastosAnio;
+  const sinCosto=(costoTurbo+costoLubri)===0;
+
   // tabla mensual
   const filas = MES.map((mm,mi)=>{
     const t=totalPeriodo({rubro:'turbo',year:y,month:mi});
@@ -631,6 +658,30 @@ function viewResumen(){
     {ic:'🌀', lbl:'Turbos (año)', val:money(anioTurbo), delta:tPct+'%', up:true, per:'del total'},
     {ic:'🛢️', lbl:'Lubricentro (año)', val:money(anioLubri), delta:(100-tPct)+'%', up:true, per:'del total'},
   ])}
+  ${statsRow([
+    {ic:'💹', lbl:'Ganancia Bruta (año)', val:money(brutoTot), delta:anioTot?Math.round(brutoTot/anioTot*100)+'%':'', up:true, per:'Ventas − costo'},
+    {ic:'🏦', lbl:'Ganancia Neta (año)', val:money(netaTot), delta:netaTot>=0?'Positiva':'Negativa', up:netaTot>=0, per:'− gastos'},
+    {ic:'🌀', lbl:'Bruta Turbos (año)', val:money(brutoTurbo), delta:'', up:true, per:'año'},
+    {ic:'🛢️', lbl:'Bruta Lubricentro (año)', val:money(brutoLubri), delta:'', up:true, per:'año'},
+  ])}
+  <div class="panel" style="margin-bottom:16px">
+    <div class="panel-tools"><strong>Rentabilidad — ${y}</strong>${sinCosto?'<span class="muted" style="margin-left:auto;font-size:12px">⚠️ Cargá el costo de los productos para ver la ganancia real</span>':''}</div>
+    <table>
+      <thead><tr><th>Rubro</th><th class="right">Ingresos</th><th class="right">Costo mercadería</th><th class="right">Ganancia Bruta</th><th class="right">Margen</th></tr></thead>
+      <tbody>
+        <tr><td class="strong">🌀 Turbos</td><td class="right mono">${money(anioTurbo)}</td><td class="right mono">${money(costoTurbo)}</td><td class="right strong mono" style="color:var(--green)">${money(brutoTurbo)}</td><td class="right mono">${anioTurbo?Math.round(brutoTurbo/anioTurbo*100):0}%</td></tr>
+        <tr><td class="strong">🛢️ Lubricentro</td><td class="right mono">${money(anioLubri)}</td><td class="right mono">${money(costoLubri)}</td><td class="right strong mono" style="color:var(--green)">${money(brutoLubri)}</td><td class="right mono">${anioLubri?Math.round(brutoLubri/anioLubri*100):0}%</td></tr>
+      </tbody>
+      <tfoot><tr style="background:#fbfbfa">
+        <td class="strong">GANANCIA BRUTA</td><td class="right strong mono">${money(anioTot)}</td><td class="right strong mono">${money(costoTurbo+costoLubri)}</td>
+        <td class="right strong mono" style="color:var(--green)">${money(brutoTot)}</td><td class="right mono">${anioTot?Math.round(brutoTot/anioTot*100):0}%</td></tr></tfoot>
+    </table>
+    <div style="padding:14px 16px;display:flex;flex-wrap:wrap;gap:28px;border-top:1px solid var(--line2)">
+      <div><div class="csub">Ganancia Bruta (año)</div><div class="strong mono" style="font-size:18px">${money(brutoTot)}</div></div>
+      <div><div class="csub">− Gastos del año</div><div class="strong mono" style="font-size:18px;color:var(--red)">${money(gastosAnio)}</div></div>
+      <div><div class="csub">= GANANCIA NETA (año)</div><div class="strong mono" style="font-size:22px;color:${netaTot>=0?'var(--green)':'var(--red)'}">${money(netaTot)}</div></div>
+    </div>
+  </div>
   <div class="two-col">
     <div class="card">
       <h3>Evolución mensual ${y}</h3><div class="csub">Turbos vs. Lubricentro</div>
@@ -1568,7 +1619,17 @@ function delRecepcion(id){
 
 /* ================= Modal: NUEVO SERVICE (lubricentro) ================= */
 let svcCart=[];
-function lubriProdOptions(){ return DB.productos.filter(p=>p.rubro==='lubricentro').map(p=>`<option value="${p.nombre.replace(/"/g,'&quot;')}">${p.nombre} — stock ${num(p.stock)}</option>`).join(''); }
+function lubriLabel(p){ const code=(p.sku&&p.sku!==p.nombre)?p.sku:''; return code?(code+' — '+p.nombre):p.nombre; }
+function lubriProdOptions(){ return DB.productos.filter(p=>p.rubro==='lubricentro').map(p=>`<option value="${lubriLabel(p).replace(/"/g,'&quot;')}">${lubriLabel(p)} · stock ${num(p.stock)}</option>`).join(''); }
+function resolveLubri(txt){
+  txt=(txt||'').trim(); if(!txt) return null;
+  const ps=DB.productos.filter(p=>p.rubro==='lubricentro'), t=txt.toLowerCase();
+  return ps.find(p=>lubriLabel(p).toLowerCase()===t)
+      || ps.find(p=>p.sku && p.sku.toLowerCase()===t)
+      || ps.find(p=>p.nombre.toLowerCase()===t)
+      || ps.find(p=>p.sku && t.startsWith(p.sku.toLowerCase()))
+      || null;
+}
 function openService(){
   // arranca con insumos típicos de un service
   svcCart=[{nombre:'',cantidad:''},{nombre:'',cantidad:''},{nombre:'',cantidad:''}];
@@ -1611,7 +1672,7 @@ function renderSvcRows(){
   const cont=$('#svcRows'); if(!cont) return;
   cont.innerHTML = svcCart.map((it,i)=>`
     <div class="item-row" style="grid-template-columns:1fr 110px 34px">
-      <input list="lubrilist" value="${(it.nombre||'').replace(/"/g,'&quot;')}" placeholder="Insumo (filtro, aceite…)" oninput="svcSet(${i},'nombre',this.value)">
+      <input list="lubrilist" value="${(it.nombre||'').replace(/"/g,'&quot;')}" placeholder="Código o nombre del insumo…" oninput="svcSet(${i},'nombre',this.value)">
       <input type="number" min="0" step="any" value="${it.cantidad}" placeholder="Cant/Litros" oninput="svcSet(${i},'cantidad',this.value)">
       <button class="rm" onclick="delSvcRow(${i})">✕</button>
     </div>`).join('') + `<datalist id="lubrilist">${lubriProdOptions()}</datalist>`;
@@ -1626,7 +1687,7 @@ function saveService(){
   const patente=$('#s-patente').value.trim().toUpperCase();
   if(monto<=0){ toast('Ingresá el monto cobrado.'); return; }
   const insumos=svcCart.filter(it=>(it.nombre||'').trim()&&parseFloat((it.cantidad||'').toString().replace(',','.'))>0)
-    .map(it=>({nombre:it.nombre.trim(),cantidad:+parseFloat(it.cantidad.toString().replace(',','.'))}));
+    .map(it=>{ const p=resolveLubri(it.nombre); return {nombre:p?p.nombre:it.nombre.trim(), sku:p?(p.sku||''):'', cantidad:+parseFloat(it.cantidad.toString().replace(',','.'))}; });
   const venta={id:uid(),fecha:$('#s-fecha').value||todayISO(),rubro:'lubricentro',tipo:'service',
     cliente:(vehiculo||patente||'Consumidor final'),vehiculo,patente,telefono:$('#s-telefono').value.trim(),kilometros:+$('#s-km').value||0,
     metodo:$('#s-metodo').value, items:[{nombre:'Service / cambio de aceite'+(patente?' — '+patente:''),cantidad:1,precio:monto}],
