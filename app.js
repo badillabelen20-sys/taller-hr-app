@@ -1455,6 +1455,9 @@ function openProduct(id){
 }
 function productModalHTML(p){
   const e=p||{nombre:'',sku:'',rubro:'turbo',tipo:'',costo:'',precio:'',stock:'',stockMin:''};
+  // margen de ganancia actual (para pre-cargar al editar); si no aplica, 60
+  let defGan=60;
+  if(p){ const c=+e.costo||0, pr=+e.precio||0; if(c>0&&pr>0){ const g=Math.round((pr/(c*1.21)-1)*100); if(isFinite(g)&&g>=0&&g<=2000) defGan=g; } }
   return `
   <div class="modal" style="max-width:560px">
     <div class="modal-head"><div><h2>${p?'Editar producto':'Agregar producto'}</h2><p>Datos de inventario</p></div>
@@ -1468,13 +1471,12 @@ function productModalHTML(p){
           <select id="p-rubro"><option value="turbo" ${e.rubro==='turbo'?'selected':''}>Turbos</option><option value="lubricentro" ${e.rubro==='lubricentro'?'selected':''}>Lubricentro</option></select></div>
       </div>
       <div class="field"><label>Tipo / categoría</label><input id="p-tipo" value="${e.tipo||''}" placeholder="Aceite, Filtro, Repuesto, Turbo nuevo…"></div>
-      <div class="grid3">
+      <div class="grid2">
         <div class="field"><label>Precio de costo</label><input type="number" min="0" step="any" id="p-costo" value="${e.costo}" placeholder="0" oninput="calcVenta()"></div>
-        <div class="field"><label>IVA %</label><input type="number" min="0" step="any" id="p-iva" value="21" oninput="calcVenta()"></div>
-        <div class="field"><label>Ganancia %</label><input type="number" min="0" step="any" id="p-gan" value="60" oninput="calcVenta()"></div>
+        <div class="field"><label>% de ganancia (vos elegís)</label><input type="number" min="0" step="any" id="p-gan" value="${defGan}" placeholder="Ej: 60" oninput="calcVenta()"></div>
       </div>
-      <div class="field"><label>Precio de venta ${p?'':'(calculado — podés ajustarlo)'}</label><input type="number" min="0" step="any" id="p-precio" value="${e.precio}" placeholder="0"></div>
-      <div id="p-calc" class="qty-hint" style="margin:-8px 0 12px">Poné el costo y se calcula solo: costo → +21% IVA → +60% ganancia.</div>
+      <div class="field"><label>Precio de venta (calculado — podés ajustarlo)</label><input type="number" min="0" step="any" id="p-precio" value="${e.precio}" placeholder="0"></div>
+      <div id="p-calc" class="qty-hint" style="margin:-8px 0 12px">El <b>IVA 21% se agrega siempre</b>. Poné el costo y tu % de ganancia, y se calcula el precio de venta.</div>
       <div class="grid2">
         <div class="field"><label>Stock actual</label><input type="number" min="0" id="p-stock" value="${e.stock}" placeholder="0"></div>
         <div class="field"><label>Stock mínimo</label><input type="number" min="0" id="p-min" value="${e.stockMin}" placeholder="0"></div>
@@ -1488,14 +1490,14 @@ function productModalHTML(p){
 }
 function calcVenta(){
   const costo=parseFloat(($('#p-costo').value||'').toString().replace(',','.'))||0;
-  const iva=parseFloat(($('#p-iva').value||'').toString().replace(',','.'))||0;
+  const iva=21;   // IVA fijo, siempre
   const gan=parseFloat(($('#p-gan').value||'').toString().replace(',','.'))||0;
   const conIva=costo*(1+iva/100);
   const venta=round10(conIva*(1+gan/100));
   if(costo>0){ const pv=$('#p-precio'); if(pv) pv.value=venta; }
   const el=$('#p-calc'); if(el) el.innerHTML = costo>0
-    ? `Costo ${money(costo)} → +${iva}% IVA = ${money(conIva)} → +${gan}% ganancia = <b style="color:var(--ink)">${money(venta)}</b>`
-    : 'Poné el costo y se calcula solo: costo → +21% IVA → +60% ganancia.';
+    ? `Costo ${money(costo)} → +21% IVA = ${money(conIva)} → +${gan}% ganancia = <b style="color:var(--ink)">${money(venta)}</b>`
+    : 'El <b>IVA 21% se agrega siempre</b>. Poné el costo y tu % de ganancia, y se calcula el precio de venta.';
 }
 function saveProduct(){
   const nombre=$('#p-nombre').value.trim();
