@@ -341,3 +341,31 @@ h1,h2,h3,.brand .name,.page-head h1,.stat .s-val,.pos-card .pc-name,.day-head .d
 .btn.service:hover{background:#0b8a5a;border-color:#0b8a5a}
 /* Encabezado de categoría en Control de Stock */
 tr.cat-row td{background:#f0f0ee;font-weight:800;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:#555;padding:8px 16px}
+
+/* ===== Interactividad y pulido visual (hover) ===== */
+.stat,.card,.panel,.btn,.nav-item,.rowbtn,.pay,.op,.cli-stats>div,.pos-results button,.pill,.tag,.seg button,.linkname,.stat .si,.thumb{
+  transition:transform .16s ease, box-shadow .2s ease, background .16s ease, border-color .16s ease, color .16s ease;
+}
+.stat:hover,.card:hover{ transform:translateY(-3px); box-shadow:0 12px 30px rgba(20,20,25,.12); border-color:#e4e4e6; }
+.stat:hover .si{ transform:scale(1.12) rotate(-4deg); }
+.panel:hover{ box-shadow:0 6px 22px rgba(20,20,25,.07); }
+.btn:hover{ transform:translateY(-1px); }
+.btn:active{ transform:translateY(0); }
+.btn.primary:hover,.btn.service:hover{ box-shadow:0 7px 20px rgba(0,0,0,.2); }
+.nav-item{ transition:transform .14s ease, background .14s ease, color .14s ease; }
+.nav-item:hover{ transform:translateX(3px); }
+.rowbtn:hover{ transform:translateY(-1px); box-shadow:0 3px 8px rgba(0,0,0,.08); }
+.pay:hover{ transform:translateY(-3px); box-shadow:0 8px 20px rgba(0,0,0,.1); }
+.op:hover{ border-color:#dcdce2; box-shadow:0 5px 16px rgba(0,0,0,.06); transform:translateY(-1px); }
+.cli-stats>div:hover{ transform:translateY(-2px); box-shadow:0 6px 16px rgba(0,0,0,.07); }
+.linkname:hover{ color:var(--brand-ink); }
+tbody tr{ transition:background .14s ease; }
+tbody tr:hover .thumb{ transform:scale(1.06); }
+.pill:hover,.tag:hover{ transform:translateY(-1px); }
+.stat .si svg,.thumb svg{ display:block; }
+/* Aparición suave del contenido al cambiar de vista */
+#content{ animation:fadeUp .28s ease; }
+@keyframes fadeUp{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:none; } }
+/* Modales con entrada suave */
+.modal{ animation:pop .18s ease; }
+@keyframes pop{ from{ opacity:0; transform:scale(.97) translateY(6px); } to{ opacity:1; transform:none; } }

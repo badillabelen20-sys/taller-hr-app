@@ -342,10 +342,39 @@ function viewInicio(){
   </div>`;
 }
 
+// Íconos de línea profesionales para las tarjetas (reemplazan los emojis)
+const STAT_ICONS={
+  '💵':'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.2"/>',
+  '💸':'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.2"/><path d="M6 12h.01M18 12h.01"/>',
+  '💰':'<circle cx="12" cy="12" r="9"/><line x1="12" y1="6" x2="12" y2="18"/><path d="M15 9.3c-.6-.9-1.8-1.3-3-1.3-1.7 0-3 .9-3 2s1.3 1.8 3 2 3 1 3 2-1.3 2-3 2c-1.2 0-2.4-.5-3-1.4"/>',
+  '📅':'<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/>',
+  '📆':'<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/>',
+  '🌀':'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>',
+  '🛢️':'<path d="M12 3s6 5.4 6 10a6 6 0 0 1-12 0c0-4.6 6-10 6-10z"/>',
+  '🧾':'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/>',
+  '💹':'<polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/>',
+  '📈':'<polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/>',
+  '📉':'<polyline points="3 7 9 13 13 9 21 17"/><polyline points="15 17 21 17 21 11"/>',
+  '🏦':'<path d="M12 3 3 8h18z"/><line x1="4" y1="21" x2="20" y2="21"/><line x1="6" y1="10" x2="6" y2="18"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="14" y1="10" x2="14" y2="18"/><line x1="18" y1="10" x2="18" y2="18"/>',
+  '📦':'<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/>',
+  '⚠️':'<path d="M10.3 3.3 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.3a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  '⛔':'<circle cx="12" cy="12" r="9"/><line x1="7.5" y1="12" x2="16.5" y2="12"/>',
+  '🏢':'<path d="M5 22V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v18"/><path d="M9 22v-4h6v4"/><line x1="9" y1="7" x2="9.01" y2="7"/><line x1="15" y1="7" x2="15.01" y2="7"/><line x1="9" y1="11" x2="9.01" y2="11"/><line x1="15" y1="11" x2="15.01" y2="11"/>',
+  '⏳':'<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+  '⏱️':'<circle cx="12" cy="13" r="8"/><polyline points="12 9 12 13 15 14"/><line x1="9" y1="2" x2="15" y2="2"/>',
+  '🏷️':'<path d="M20.6 13.4 13 21a2 2 0 0 1-2.8 0L3 13.8V4h9.8L20.6 11a2 2 0 0 1 0 2.4z"/><circle cx="7.5" cy="7.5" r="1.2"/>',
+  '🧰':'<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  '🔧':'<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  '✅':'<path d="M22 11.1V12a10 10 0 1 1-5.9-9.1"/><polyline points="22 4 12 14.5 9 11.5"/>',
+  '💳':'<rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/>',
+  '⚖️':'<line x1="12" y1="3" x2="12" y2="21"/><line x1="4" y1="7" x2="20" y2="7"/><path d="M6 7 3 13a3 3 0 0 0 6 0z"/><path d="M18 7l-3 6a3 3 0 0 0 6 0z"/>',
+  '🧮':'<rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="8.01" y2="10"/><line x1="12" y1="10" x2="12.01" y2="10"/><line x1="16" y1="10" x2="16.01" y2="10"/>',
+};
+function statIco(e){ const p=STAT_ICONS[e]; return p?`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`:e; }
 function statsRow(cards){
   return `<div class="stats">${cards.map(c=>`
     <div class="stat">
-      <div class="s-top"><span class="si">${c.ic}</span>${c.lbl}<span class="dots">⋯</span></div>
+      <div class="s-top"><span class="si">${statIco(c.ic)}</span>${c.lbl}<span class="dots">⋯</span></div>
       <div class="s-val">${c.val}</div>
       <div class="s-foot"><span class="delta ${c.up?'up':'down'}">${c.up?'▲':'▼'} ${c.delta}</span><span class="period">${c.per}</span></div>
     </div>`).join('')}</div>`;
