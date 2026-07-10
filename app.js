@@ -417,6 +417,7 @@ function viewVentas(){
     <div><h1>Ventas</h1><p>Registrá y consultá las ventas de turbos y lubricentro</p></div>
     <div class="actions">
       <button class="btn" onclick="exportCSV('ventas')">⭳ Exportar</button>
+      <button class="btn service" onclick="openService()">🛢️ NUEVO SERVICE</button>
       <button class="btn primary" onclick="openSale()">＋ Nueva venta</button>
     </div>
   </div>
@@ -500,9 +501,15 @@ function saveVentaEdit(){
 }
 
 /* ---- CONTROL DE STOCK ---- */
+// Ordena por categoría (tipo) y dentro, alfabético por nombre
+function sortStock(arr){ return [...arr].sort((a,b)=>{
+  const ta=(a.tipo||'zzz').toLowerCase(), tb=(b.tipo||'zzz').toLowerCase();
+  return ta.localeCompare(tb,'es') || (a.nombre||'').toLowerCase().localeCompare((b.nombre||'').toLowerCase(),'es');
+}); }
 function viewStock(){
   let list=[...DB.productos];
   if(stockFilter!=='todos') list=list.filter(p=>p.rubro===stockFilter);
+  list=sortStock(list);
   const valorStock = DB.productos.reduce((s,p)=>s+p.costo*p.stock,0);
   const nBajos=DB.productos.filter(p=>p.stock<=p.stockMin).length;
   const nSin=DB.productos.filter(p=>p.stock<=0).length;
@@ -536,7 +543,12 @@ function viewStock(){
 }
 function rowsStock(list){
   if(!list.length) return `<tr><td colspan="8"><div class="empty"><div class="big">📦</div>No hay productos.<br><button class="btn primary sm" style="margin-top:12px" onclick="openProduct()">＋ Agregar producto</button></div></td></tr>`;
-  return list.map(p=>{const e=estadoStock(p);return `
+  let html='', lastCat=null;
+  list.forEach(p=>{
+    const cat=(p.tipo||'').trim()||'Sin categoría';
+    if(cat!==lastCat){ html+=`<tr class="cat-row"><td colspan="8">${cat}</td></tr>`; lastCat=cat; }
+    const e=estadoStock(p);
+    html+=`
     <tr>
       <td class="cell-name"><div class="thumb">${p.rubro==='turbo'?'🌀':'🛢️'}</div>
         <div><div class="t">${p.nombre}</div><div class="sub">${p.tipo||''}</div></div></td>
@@ -550,7 +562,9 @@ function rowsStock(list){
         <button class="rowbtn" onclick="openProduct('${p.id}')">Editar</button>
         <button class="rowbtn del" onclick="delProducto('${p.id}')">✕</button>
       </td>
-    </tr>`}).join('');
+    </tr>`;
+  });
+  return html;
 }
 
 /* ---- LIBRO DIARIO ---- */
@@ -1256,7 +1270,7 @@ function wireView(){
       v.items.some(i=>i.nombre.toLowerCase().includes(t)))); };
   const qs=$('#qStock'); if(qs) qs.oninput=()=>{ const t=qs.value.toLowerCase();
     let l=DB.productos.filter(p=>stockFilter==='todos'||p.rubro===stockFilter);
-    $('#stockBody').innerHTML=rowsStock(l.filter(p=>p.nombre.toLowerCase().includes(t)||(p.sku||'').toLowerCase().includes(t))); };
+    $('#stockBody').innerHTML=rowsStock(sortStock(l.filter(p=>p.nombre.toLowerCase().includes(t)||(p.sku||'').toLowerCase().includes(t)))); };
   const qr=$('#qRec'); if(qr) qr.oninput=()=>{ const t=qr.value.toLowerCase();
     let l=[...DB.recepciones];
     if(recFilter==='taller') l=l.filter(r=>!r.entregado);
@@ -1272,8 +1286,7 @@ let pos = {id:null, qty:1, price:0};
 function posPanel(){
   return `
   <div class="panel">
-    <div class="pos-head"><h3>⚡ Punto de Venta Rápido</h3>
-      <button class="btn sm" onclick="openService()">🛢️ ＋ Nuevo Service</button></div>
+    <div class="pos-head"><h3>⚡ Punto de Venta Rápido</h3></div>
     <div class="pos-body">
       <div class="pos-search">
         <input id="posQ" autocomplete="off" placeholder="Buscar producto para vender (nombre o código)…"
