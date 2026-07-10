@@ -274,7 +274,9 @@ function go(view, opts={}){
   $$('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.view===view && (b.dataset.rubro||null)===want));
   closeSidebar();
   render();
+  animateView();
 }
+function animateView(){ const c=$('#content'); if(!c)return; c.classList.remove('view-anim'); void c.offsetWidth; c.classList.add('view-anim'); }
 
 function render(){
   const el = $('#content');
@@ -370,7 +372,13 @@ const STAT_ICONS={
   '⚖️':'<line x1="12" y1="3" x2="12" y2="21"/><line x1="4" y1="7" x2="20" y2="7"/><path d="M6 7 3 13a3 3 0 0 0 6 0z"/><path d="M18 7l-3 6a3 3 0 0 0 6 0z"/>',
   '🧮':'<rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="8.01" y2="10"/><line x1="12" y1="10" x2="12.01" y2="10"/><line x1="16" y1="10" x2="16.01" y2="10"/>',
 };
-function statIco(e){ const p=STAT_ICONS[e]; return p?`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`:e; }
+Object.assign(STAT_ICONS,{
+  '👤':'<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>',
+  '🚗':'<path d="M5 13l1.6-4.6A2 2 0 0 1 8.5 7h7a2 2 0 0 1 1.9 1.4L19 13v5a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><line x1="5" y1="13" x2="19" y2="13"/><circle cx="7.5" cy="16" r="1"/><circle cx="16.5" cy="16" r="1"/>',
+  '📖':'<path d="M12 6c-2-1.3-4.5-2-8-2v14c3.5 0 6 .7 8 2 2-1.3 4.5-2 8-2V4c-3.5 0-6 .7-8 2z"/><line x1="12" y1="6" x2="12" y2="20"/>',
+});
+function statIco(e){ return ico(e,14); }
+function ico(e,size){ const p=STAT_ICONS[e]; return p?`<svg viewBox="0 0 24 24" width="${size||18}" height="${size||18}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`:e; }
 function statsRow(cards){
   return `<div class="stats">${cards.map(c=>`
     <div class="stat">
@@ -421,7 +429,7 @@ function miniVentas(list){
   if(!list.length) return '<p class="muted">Sin ventas registradas.</p>';
   return `<table><tbody>${list.map(v=>`
     <tr>
-      <td class="cell-name"><div class="thumb">${v.rubro==='turbo'?'🌀':'🛢️'}</div>
+      <td class="cell-name"><div class="thumb">${ico(v.rubro==='turbo'?'🌀':'🛢️')}</div>
         <div><div class="t">${v.cliente||'Consumidor final'}</div><div class="sub">${v.vehiculo||''} · ${fmtDate(v.fecha)}</div></div></td>
       <td class="right strong mono">${money(v.total)}</td>
     </tr>`).join('')}</tbody></table>`;
@@ -432,7 +440,7 @@ function alertasStock(){
   if(!bajos.length) return '';
   return `<table><tbody>${bajos.map(p=>{const e=estadoStock(p);return `
     <tr>
-      <td class="cell-name"><div class="thumb">${p.rubro==='turbo'?'🌀':'🛢️'}</div>
+      <td class="cell-name"><div class="thumb">${ico(p.rubro==='turbo'?'🌀':'🛢️')}</div>
         <div><div class="t">${p.nombre}</div><div class="sub">${p.sku}</div></div></td>
       <td class="right"><span class="pill ${e.cls}">${e.txt}</span> <span class="muted mono">· ${p.stock} u.</span></td>
     </tr>`}).join('')}</tbody></table>`;
@@ -469,7 +477,7 @@ function rowsVentas(list){
   if(!list.length) return `<tr><td colspan="7"><div class="empty"><div class="big">🧾</div>No hay ventas registradas.<br><button class="btn primary sm" style="margin-top:12px" onclick="openSale()">＋ Registrar venta</button></div></td></tr>`;
   return list.map(v=>`
     <tr>
-      <td class="cell-name"><div class="thumb">${v.rubro==='turbo'?'🌀':'🛢️'}</div>
+      <td class="cell-name"><div class="thumb">${ico(v.rubro==='turbo'?'🌀':'🛢️')}</div>
         <div><div class="t">${v.cliente||'Consumidor final'}</div><div class="sub">${v.vehiculo||'—'}</div></div></td>
       <td><span class="tag ${v.rubro==='turbo'?'turbo':'lubri'}">${v.rubro==='turbo'?'Turbos':'Lubricentro'}</span></td>
       <td class="muted">${v.items.map(i=>`${i.cantidad>1?i.cantidad+'× ':''}${i.nombre}`).join(', ').slice(0,60)}${v.items.map(i=>i.nombre).join(', ').length>60?'…':''}</td>
@@ -579,7 +587,7 @@ function rowsStock(list){
     const e=estadoStock(p);
     html+=`
     <tr>
-      <td class="cell-name"><div class="thumb">${p.rubro==='turbo'?'🌀':'🛢️'}</div>
+      <td class="cell-name"><div class="thumb">${ico(p.rubro==='turbo'?'🌀':'🛢️')}</div>
         <div><div class="t">${p.nombre}</div><div class="sub">${p.tipo||''}</div></div></td>
       <td class="muted mono">${p.sku||'—'}</td>
       <td><span class="tag ${p.rubro==='turbo'?'turbo':'lubri'}">${p.rubro==='turbo'?'Turbos':'Lubricentro'}</span></td>
@@ -617,7 +625,7 @@ function viewDiario(){
       </div>
       <table><tbody>${groups[f].map(v=>`
         <tr>
-          <td class="cell-name" style="width:34%"><div class="thumb">${esRep?'🔧':'🛢️'}</div>
+          <td class="cell-name" style="width:34%"><div class="thumb">${ico(esRep?'🔧':'🛢️')}</div>
             <div><div class="t">${esRep?(v.items[0]?v.items[0].nombre:'—'):(v.cliente||'Consumidor final')}</div><div class="sub">${esRep?(v.cliente&&v.cliente!=='Repuesto usado'?v.cliente:'Repuesto usado'):(v.vehiculo||'—')}</div></div></td>
           ${esRep
             ? `<td class="muted">Cant: ${v.items.map(i=>num(i.cantidad)).join(', ')}</td><td class="muted mono" style="width:120px">${fmtDate(v.fecha)}</td><td class="right"><button class="rowbtn del" onclick="delVenta('${v.id}')">Quitar</button></td>`
@@ -846,7 +854,7 @@ function rowsRecepcion(list){
     const reps=(r.productos||[]).map(p=>`${p.cantidad>1?p.cantidad+'× ':''}${p.nombre}`).join(', ');
     return `
     <tr>
-      <td class="cell-name"><div class="thumb">🌀</div>
+      <td class="cell-name"><div class="thumb">${ico('🌀')}</div>
         <div><div class="t">${r.cliente||'—'}</div><div class="sub">${r.vehiculo||'—'} · ${r.telefono||'s/tel'}</div></div></td>
       <td class="muted mono">${fmtDate(r.ingreso)}</td>
       <td class="right">${r.presupuestado?`<span class="strong mono">${money(r.costoPresupuesto)}</span>`:'<span class="muted">Sin presup.</span>'}</td>
@@ -893,7 +901,7 @@ function viewClientes(){
     ? `<tr><th>Cliente</th><th>Teléfono</th><th>Vehículo (turbo)</th><th>Notas</th><th class="right">Turbos</th><th>Última visita</th></tr>`
     : `<tr><th>Cliente</th><th>Vehículo</th><th>Patente</th><th>Teléfono</th><th class="right">Últimos km</th><th class="right">Services</th><th class="right">Total</th><th>Última visita</th></tr>`;
 
-  const nameCell = c => `<td class="cell-name"><div class="thumb">${esTurbo?'👤':'👤'}</div>
+  const nameCell = c => `<td class="cell-name"><div class="thumb">${ico('👤')}</div>
       <div><a class="linkname" onclick="openClient('${b64(c.clave)}')">${c.nombre||'—'}</a>
       <div class="sub">${c.tel?('📞 '+c.tel):'<span class="muted">sin teléfono</span>'}</div></div></td>`;
 
@@ -943,7 +951,7 @@ function openClient(enc){
     last=(recs[0].entregado&&recs[0].entrega)?recs[0].entrega:recs[0].ingreso;
     items=recs.map(r=>{
       const reps=(r.productos||[]).map(p=>`${p.cantidad>1?p.cantidad+'× ':''}${p.nombre}`).join(', ');
-      return `<div class="op"><div class="op-ic">🧰</div><div class="op-main">
+      return `<div class="op"><div class="op-ic">${ico('🧰')}</div><div class="op-main">
         <div class="op-detail">🌀 ${r.vehiculo||'Turbo'}</div>
         ${r.notas?`<div class="op-sub">📝 ${r.notas}</div>`:''}
         ${reps?`<div class="op-sub">Repuestos: ${reps}</div>`:''}
@@ -959,7 +967,7 @@ function openClient(enc){
     nombre=svs.find(v=>v.cliente)?.cliente||svs.find(v=>v.vehiculo)?.vehiculo||key; last=svs[0].fecha;
     items=svs.map(v=>{
       const insumos=(v.insumos||[]).map(i=>`${i.cantidad>1?i.cantidad+'× ':''}${i.nombre}`).join(', ');
-      return `<div class="op"><div class="op-ic">🛢️</div><div class="op-main">
+      return `<div class="op"><div class="op-ic">${ico('🛢️')}</div><div class="op-main">
         <div class="op-detail"><b>Service</b>${v.kilometros?` · ${num(v.kilometros)} km`:''}${v.patente?` · ${v.patente}`:''}</div>
         ${insumos?`<div class="op-sub">Insumos: ${insumos}</div>`:'<div class="op-sub muted">Sin insumos cargados</div>'}
         <div class="op-meta">${fmtDate(v.fecha)} · ${v.metodo||'—'}</div>
@@ -1071,7 +1079,7 @@ function viewProveedores(){
       <tbody>${DB.proveedores.length?DB.proveedores.map(p=>{
         const pend=DB.compras.filter(c=>c.proveedorId===p.id&&!c.saldado).reduce((s,c)=>s+c.costo,0);
         return `<tr>
-          <td class="cell-name"><div class="thumb">🏢</div><div><div class="t">${p.nombre}</div><div class="sub">${p.rubro||''}</div></div></td>
+          <td class="cell-name"><div class="thumb">${ico('🏢')}</div><div><div class="t">${p.nombre}</div><div class="sub">${p.rubro||''}</div></div></td>
           <td class="mono muted">${p.telefono||'—'}</td>
           <td class="right mono ${pend?'strong':''}" ${pend?'style="color:var(--red)"':''}>${pend?money(pend):'—'}</td>
           <td class="right" style="white-space:nowrap">
@@ -1084,7 +1092,7 @@ function viewProveedores(){
       <table><thead><tr><th>Proveedor / Detalle</th><th>Fecha</th><th class="right">Costo</th><th>Estado</th><th></th></tr></thead>
       <tbody>${compras.length?compras.map(c=>`
         <tr>
-          <td class="cell-name"><div class="thumb">🧾</div><div><div class="t">${nombreProveedor(c.proveedorId)}</div><div class="sub">${c.detalle||''}</div></div></td>
+          <td class="cell-name"><div class="thumb">${ico('🧾')}</div><div><div class="t">${nombreProveedor(c.proveedorId)}</div><div class="sub">${c.detalle||''}</div></div></td>
           <td class="muted mono">${fmtDate(c.fecha)}</td>
           <td class="right strong mono">${money(c.costo)}</td>
           <td>${c.saldado?`<span class="pill ok">Saldado</span> <span class="muted">${c.metodo||''}</span>`:'<span class="pill off">Pendiente</span>'}</td>
@@ -1135,7 +1143,7 @@ function viewGastos(){
       <table><thead><tr><th>Concepto</th><th>Tipo</th><th>Fecha</th><th>Pago</th><th class="right">Monto</th><th></th></tr></thead>
       <tbody>${list.length?list.map(g=>`
         <tr>
-          <td class="cell-name"><div class="thumb">${g._tipo==='compra'?'📦':'💸'}</div><div class="t">${g.detalle||g.tipo}</div></td>
+          <td class="cell-name"><div class="thumb">${ico(g._tipo==='compra'?'📦':'💸')}</div><div class="t">${g.detalle||g.tipo}</div></td>
           <td class="muted">${g.tipo}</td>
           <td class="muted mono">${fmtDate(g.fecha)}</td>
           <td>${g.estado==='Pendiente'?'<span class="pill off">Pendiente</span>':`<span class="muted">${g.metodo||'—'}</span>`}</td>
@@ -1230,7 +1238,7 @@ function viewConfig(){
       <table><thead><tr><th>Nombre</th><th>Rol</th><th></th></tr></thead>
       <tbody>${DB.usuarios.length?DB.usuarios.map(x=>`
         <tr>
-          <td class="cell-name"><div class="thumb">👤</div><div class="t">${x.nombre||'(sin nombre)'}${CURRENT_USER&&x.id===CURRENT_USER.id?' <span class="muted">(vos)</span>':''}</div></td>
+          <td class="cell-name"><div class="thumb">${ico('👤')}</div><div class="t">${x.nombre||'(sin nombre)'}${CURRENT_USER&&x.id===CURRENT_USER.id?' <span class="muted">(vos)</span>':''}</div></td>
           <td class="muted">${x.rol||'Integrante'}</td>
           <td class="right" style="white-space:nowrap">
             <button class="rowbtn" onclick="openUsuario('${x.id}')">Editar</button>
@@ -1965,7 +1973,7 @@ async function entrar(session){
 }
 function showLogin(){ $('#loginScreen').classList.remove('hide'); $('.app').classList.add('hide'); const e=$('#li-user'); if(e){ e.value=''; e.focus(); } }
 function showLoading(){ const er=$('#li-error'); if(er){ er.textContent='Cargando datos…'; er.classList.remove('hide'); } }
-function showApp(){ $('#loginScreen').classList.add('hide'); $('.app').classList.remove('hide'); render(); }
+function showApp(){ $('#loginScreen').classList.add('hide'); $('.app').classList.remove('hide'); render(); animateView(); }
 
 async function doLogin(){
   const email=$('#li-user').value.trim(), pass=$('#li-pass').value;
