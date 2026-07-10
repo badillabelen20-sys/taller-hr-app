@@ -81,9 +81,20 @@ async function loadAll(){
   const fresh={};
   for(const t of TABLES){ fresh[t] = (await fetchAllRows(t)).map(r=>toApp(t,r)); }
   const perf = await fetchAllRows('perfiles');
-  for(const t of TABLES) DB[t]=fresh[t];   // se aplica SOLO si todas las tablas cargaron bien
+  let pend=false;
+  for(const t of TABLES){
+    const prev=SNAP[t]||new Map();
+    const cloudIds=new Set(fresh[t].map(x=>x.id));
+    // filas agregadas localmente que todavía NO están en la nube → conservarlas (no perderlas al recargar)
+    const unsaved=(DB[t]||[]).filter(o=> !prev.has(o.id) && !cloudIds.has(o.id));
+    if(unsaved.length) pend=true;
+    DB[t]=fresh[t].concat(unsaved);
+  }
   DB.usuarios = perf.map(p=>({id:p.id,nombre:p.nombre||'',usuario:p.nombre||'',rol:p.rol||'Integrante'}));
-  snapshot(); backupLocal();
+  // el snapshot refleja SOLO la nube; lo pendiente queda marcado para reintentar guardar
+  SNAP={}; for(const t of TABLES) SNAP[t]=new Map(fresh[t].map(x=>[x.id, JSON.stringify(toRow(t,x))]));
+  backupLocal();
+  if(pend) runQueued(persistWithRetry);   // vuelve a intentar guardar lo que quedó pendiente
 }
 
 // Cola única: guardados y recargas se ejecutan en orden y NO se pisan (evita pérdida de datos)
@@ -1490,10 +1501,13 @@ function productModalHTML(p){
       <div class="field"><label>Tipo / categoría</label><input id="p-tipo" value="${e.tipo||''}" placeholder="Aceite, Filtro, Repuesto, Turbo nuevo…"></div>
       <div class="grid2">
         <div class="field"><label>Precio de costo</label><input type="number" min="0" step="any" id="p-costo" value="${e.costo}" placeholder="0" oninput="calcVenta()"></div>
-        <div class="field"><label>% de ganancia (vos elegís)</label><input type="number" min="0" step="any" id="p-gan" value="${defGan}" placeholder="Ej: 60" oninput="calcVenta()"></div>
+        <div class="field"><label>Precio con IVA (+21%)</label><input type="text" id="p-conIva" readonly value="${(+e.costo>0)?money(+e.costo*1.21):''}" placeholder="—" style="background:#f4f4f5;color:#555"></div>
       </div>
-      <div class="field"><label>Precio de venta (calculado — podés ajustarlo)</label><input type="number" min="0" step="any" id="p-precio" value="${e.precio}" placeholder="0"></div>
-      <div id="p-calc" class="qty-hint" style="margin:-8px 0 12px">El <b>IVA 21% se agrega siempre</b>. Poné el costo y tu % de ganancia, y se calcula el precio de venta.</div>
+      <div class="grid2">
+        <div class="field"><label>% de ganancia (vos elegís)</label><input type="number" min="0" step="any" id="p-gan" value="${defGan}" placeholder="Ej: 60" oninput="calcVenta()"></div>
+        <div class="field"><label>Precio de venta</label><input type="number" min="0" step="any" id="p-precio" value="${e.precio}" placeholder="0"></div>
+      </div>
+      <div id="p-calc" class="qty-hint" style="margin:-4px 0 12px">El <b>IVA 21%</b> se agrega siempre. Escribí el costo y tu % de ganancia → el precio de venta se calcula solo.</div>
       <div class="grid2">
         <div class="field"><label>Stock actual</label><input type="number" min="0" id="p-stock" value="${e.stock}" placeholder="0"></div>
         <div class="field"><label>Stock mínimo</label><input type="number" min="0" id="p-min" value="${e.stockMin}" placeholder="0"></div>
@@ -1511,6 +1525,7 @@ function calcVenta(){
   const gan=parseFloat(($('#p-gan').value||'').toString().replace(',','.'))||0;
   const conIva=costo*(1+iva/100);
   const venta=round10(conIva*(1+gan/100));
+  const ci=$('#p-conIva'); if(ci) ci.value = costo>0?money(conIva):'';
   if(costo>0){ const pv=$('#p-precio'); if(pv) pv.value=venta; }
   const el=$('#p-calc'); if(el) el.innerHTML = costo>0
     ? `Costo ${money(costo)} → +21% IVA = ${money(conIva)} → +${gan}% ganancia = <b style="color:var(--ink)">${money(venta)}</b>`
