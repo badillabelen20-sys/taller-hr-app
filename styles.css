@@ -372,3 +372,6 @@ tbody tr:hover .thumb{ transform:scale(1.06); }
 /* Íconos de tablas/fichas en tono suave */
 .thumb,.op-ic{ color:#606069; }
 .thumb svg,.op-ic svg{ display:block; }
+/* Que el desplegable del Punto de Venta no se corte con el borde del panel */
+.pos-panel{ overflow:visible; }
+.pos-results{ z-index:40; max-height:340px; }

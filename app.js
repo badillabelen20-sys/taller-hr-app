@@ -1392,7 +1392,7 @@ function venderCart(key){
 
 function posPanel(){
   return `
-  <div class="panel">
+  <div class="panel pos-panel">
     <div class="pos-head"><h3>⚡ Punto de Venta Rápido</h3>
       <button class="btn" onclick="openCart()">🛒 Vender varios productos</button></div>
     <div class="pos-body">
@@ -1413,8 +1413,8 @@ function posSuggest(v){
   const res=DB.productos.filter(p=>p.nombre.toLowerCase().includes(t)||(p.sku||'').toLowerCase().includes(t)).slice(0,8);
   if(!res.length){ box.innerHTML=`<button disabled style="color:var(--muted)">Sin coincidencias</button>`; box.classList.remove('hide'); return; }
   box.innerHTML=res.map(p=>{const e=estadoStock(p);return `
-    <button onclick="posSelect('${p.id}')">
-      <span>${p.rubro==='turbo'?'🌀':'🛢️'}</span>
+    <button onmousedown="event.preventDefault();posSelect('${p.id}')">
+      <span>${ico(p.rubro==='turbo'?'🌀':'🛢️')}</span>
       <span><div class="pr-name">${p.nombre}</div><div class="pr-sub">${p.sku||''} · Stock: ${num(p.stock)} · <span style="color:${e.cls==='ok'?'var(--green)':e.cls==='warn'?'var(--amber)':'var(--red)'}">${e.txt}</span></div></span>
       <span class="pr-price">${money(p.precio)}</span>
     </button>`}).join('');
@@ -1424,9 +1424,9 @@ function posSuggest(v){
 function posSelect(id){
   const p=DB.productos.find(x=>x.id===id); if(!p) return;
   pos={id, qty:1, price:p.precio};
-  $('#posResults').classList.add('hide');
+  const box=$('#posResults'); if(box){ box.classList.add('hide'); box.innerHTML=''; }
   const q=$('#posQ'); if(q) q.value=p.nombre;
-  $('#posCard').innerHTML=posCardHTML();
+  const card=$('#posCard'); if(card){ card.innerHTML=posCardHTML(); card.scrollIntoView({behavior:'smooth',block:'nearest'}); }
 }
 
 function posCardHTML(){
