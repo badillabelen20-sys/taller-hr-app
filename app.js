@@ -68,21 +68,29 @@ async function fetchAllRows(t){
   const size=1000; let from=0, all=[];
   while(true){
     const { data, error } = await supa.from(t).select('*').range(from, from+size-1);
-    if(error){ console.error('load '+t, error); break; }
+    if(error) throw error;                 // aborta la carga: NO deja la tabla a medias
     all = all.concat(data||[]);
-    if(!data || data.length < size) break;   // última tanda
+    if(!data || data.length < size) break;
     from += size;
   }
   return all;
 }
+function backupLocal(){ try{ localStorage.setItem('turbolub_backup', JSON.stringify({at:Date.now(), db:DB})); }catch(e){} }
+
 async function loadAll(){
-  for(const t of TABLES){ const rows = await fetchAllRows(t); DB[t] = rows.map(r=>toApp(t,r)); }
-  try{ const perf = await fetchAllRows('perfiles'); DB.usuarios = perf.map(p=>({id:p.id,nombre:p.nombre||'',usuario:p.nombre||'',rol:p.rol||'Integrante'})); }catch(e){ DB.usuarios=[]; }
-  snapshot();
+  const fresh={};
+  for(const t of TABLES){ fresh[t] = (await fetchAllRows(t)).map(r=>toApp(t,r)); }
+  const perf = await fetchAllRows('perfiles');
+  for(const t of TABLES) DB[t]=fresh[t];   // se aplica SOLO si todas las tablas cargaron bien
+  DB.usuarios = perf.map(p=>({id:p.id,nombre:p.nombre||'',usuario:p.nombre||'',rol:p.rol||'Integrante'}));
+  snapshot(); backupLocal();
 }
 
-let persistQ=Promise.resolve();
-async function persist(){
+// Cola única: guardados y recargas se ejecutan en orden y NO se pisan (evita pérdida de datos)
+let opQ=Promise.resolve();
+function runQueued(fn){ opQ = opQ.then(fn).catch(e=>console.error('sync',e)); return opQ; }
+
+async function persistOnce(){
   for(const t of TABLES){
     const cur=DB[t], prev=SNAP[t]||new Map(), up=[], curIds=new Set();
     for(const o of cur){ curIds.add(o.id); const rs=JSON.stringify(toRow(t,o)); if(prev.get(o.id)!==rs) up.push(toRow(t,o)); }
@@ -90,7 +98,16 @@ async function persist(){
     if(up.length){ const {error}=await supa.from(t).upsert(up); if(error) throw error; }
     if(del.length){ const {error}=await supa.from(t).delete().in('id',del); if(error) throw error; }
   }
-  snapshot();
+  snapshot(); backupLocal();   // marca "guardado" SOLO cuando todo se guardó de verdad
+}
+async function persistWithRetry(){
+  for(let i=0;i<5;i++){
+    try{ await persistOnce(); return; }
+    catch(e){ console.error('guardado intento '+(i+1), e);
+      if(i<4) await new Promise(r=>setTimeout(r,1500*(i+1)));
+      else toast('⚠ Sin conexión: los últimos cambios NO se guardaron. Revisá internet y volvé a intentar.');
+    }
+  }
 }
 
 function seed(){
@@ -165,7 +182,7 @@ function load(){
   const s = seed(); s.movimientos=[]; s.recepciones=seedRecepciones(); Object.assign(s, seedAdmin()); s.usuarios=seedUsuarios();
   localStorage.setItem(LS_KEY, JSON.stringify(s)); return s;
 }
-function save(){ persistQ = persistQ.then(persist).catch(e=>{ console.error('persist',e); snapshot(); toast('⚠ No se pudo guardar en la nube'); }); }
+function save(){ backupLocal(); runQueued(persistWithRetry); }
 
 /* ---------- Helpers de negocio ---------- */
 function estadoStock(p){
@@ -1877,7 +1894,8 @@ async function initAuth(){
 async function entrar(session){
   CURRENT_USER = { id:session.user.id, email:session.user.email, nombre:session.user.email, rol:'Integrante' };
   showLoading();
-  await loadAll();
+  try{ await loadAll(); }
+  catch(e){ console.error(e); const er=$('#li-error'); if(er){ er.textContent='No se pudieron cargar los datos. Revisá tu conexión e intentá de nuevo.'; er.classList.remove('hide'); } CURRENT_USER=null; return; }
   const perf = DB.usuarios.find(u=>u.id===CURRENT_USER.id);
   if(perf){ CURRENT_USER.nombre=perf.nombre||CURRENT_USER.email; CURRENT_USER.rol=perf.rol||'Integrante'; }
   showApp();
@@ -1905,8 +1923,8 @@ async function logout(){
 // Enter para ingresar
 document.addEventListener('keydown',e=>{ if(e.key==='Enter' && $('#loginScreen') && !$('#loginScreen').classList.contains('hide')) doLogin(); });
 // Refrescar datos al volver a la pestaña (para ver cambios de otras PC)
-document.addEventListener('visibilitychange',()=>{ if(!document.hidden && CURRENT_USER && !$('.app').classList.contains('hide')){ loadAll().then(render); } });
-async function refrescar(){ if(!CURRENT_USER)return; await loadAll(); render(); toast('🔄 Datos actualizados'); }
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden && CURRENT_USER && !$('.app').classList.contains('hide')){ runQueued(async()=>{ await loadAll(); render(); }); } });
+function refrescar(){ if(!CURRENT_USER)return; runQueued(async()=>{ await loadAll(); render(); toast('🔄 Datos actualizados'); }); }
 
 /* ================= Init ================= */
 initAuth();
