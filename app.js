@@ -1323,10 +1323,78 @@ function wireView(){
 /* ================= PUNTO DE VENTA RÁPIDO ================= */
 let pos = {id:null, qty:1, price:0};
 
+/* ===== Carrito: venta de varios productos ===== */
+let cartPos=[];
+function allProdOptions(){ return DB.productos.map(p=>{ const code=(p.sku&&p.sku!==p.nombre)?p.sku:''; const val=code?code+' — '+p.nombre:p.nombre; return `<option value="${val.replace(/"/g,'&quot;')}"></option>`; }).join(''); }
+function resolveProd(txt){ txt=(txt||'').trim(); if(!txt)return null; const t=txt.toLowerCase();
+  return DB.productos.find(p=>{ const code=(p.sku&&p.sku!==p.nombre)?p.sku:''; return (code?code+' — '+p.nombre:p.nombre).toLowerCase()===t; })
+      || DB.productos.find(p=>p.sku&&p.sku.toLowerCase()===t)
+      || DB.productos.find(p=>p.nombre.toLowerCase()===t) || null;
+}
+function openCart(){ cartPos=[]; $('#modalRoot').innerHTML=`
+  <div class="modal" style="max-width:660px">
+    <div class="modal-head"><div><h2>🛒 Venta de varios productos</h2><p>Cargá los productos y cobrá con el total según el medio de pago</p></div>
+      <button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="pos-search" style="margin-bottom:12px">
+        <input id="cartSearch" list="cartlist" placeholder="Buscar producto por nombre o código, y Enter…" autocomplete="off" onchange="cartAddFromInput(this)">
+        <datalist id="cartlist">${allProdOptions()}</datalist>
+      </div>
+      <div id="cartRowsPos"></div>
+      <div class="tot-line big"><span>Subtotal (lista)</span><span id="cartPosSub" class="mono">$0</span></div>
+      <h4 style="margin:16px 0 8px">Elegí el medio de pago para cobrar</h4>
+      <div class="pay-grid" id="cartPayGrid"></div>
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cerrar</button></div>
+  </div>`;
+  showModal(); renderCartPos(); const s=$('#cartSearch'); if(s) s.focus();
+}
+function cartAddFromInput(inp){ const p=resolveProd(inp.value); if(p){ cartPosAdd(p.id); inp.value=''; } if(inp) inp.focus(); }
+function cartPosAdd(id){ const p=DB.productos.find(x=>x.id===id); if(!p)return; const ex=cartPos.find(x=>x.id===id);
+  if(ex) ex.cantidad++; else cartPos.push({id:p.id,nombre:p.nombre,sku:p.sku||'',precio:+p.precio||0,rubro:p.rubro,cantidad:1}); renderCartPos(); }
+function cartPosSet(i,k,v){ const n=Math.max(0,parseFloat((v||'').toString().replace(',','.'))||0); cartPos[i][k]=n;
+  const cell=$('#psub-'+i); if(cell) cell.textContent=money(cartPos[i].cantidad*cartPos[i].precio); cartPosTotals(); }
+function cartPosDel(i){ cartPos.splice(i,1); renderCartPos(); }
+function renderCartPos(){
+  const cont=$('#cartRowsPos'); if(!cont) return;
+  cont.innerHTML = cartPos.length ? cartPos.map((it,i)=>`
+    <div class="item-row" style="grid-template-columns:1fr 74px 100px 96px 34px">
+      <div style="overflow:hidden;align-self:center"><div class="strong" style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${it.nombre}</div><div class="muted" style="font-size:11px">${it.sku||''}</div></div>
+      <input type="number" min="0" step="any" value="${it.cantidad}" title="Cantidad" oninput="cartPosSet(${i},'cantidad',this.value)">
+      <input type="number" min="0" step="any" value="${it.precio}" title="Precio c/u" oninput="cartPosSet(${i},'precio',this.value)">
+      <div class="right strong mono" id="psub-${i}" style="align-self:center">${money(it.cantidad*it.precio)}</div>
+      <button class="rm" onclick="cartPosDel(${i})">✕</button>
+    </div>`).join('') : '<div class="pos-empty">Buscá un producto arriba para agregarlo al carrito.</div>';
+  cartPosTotals();
+}
+function cartPosTotals(){
+  const sub=cartPos.reduce((s,it)=>s+(it.cantidad||0)*(it.precio||0),0);
+  const el=$('#cartPosSub'); if(el) el.textContent=money(sub);
+  const grid=$('#cartPayGrid'); if(grid) grid.innerHTML=PAY.map(m=>`
+    <div class="pay ${m.cls}">
+      <div class="p-lbl">${m.lbl}</div>
+      <div class="p-amt" id="cpay-${m.key}">${money(round10(sub*m.f))}</div>
+      <button onclick="venderCart('${m.key}')">VENDER</button>
+    </div>`).join('');
+}
+function venderCart(key){
+  const items=cartPos.filter(it=>it.cantidad>0);
+  if(!items.length){ toast('Agregá al menos un producto.'); return; }
+  const m=PAY.find(x=>x.key===key); const sub=items.reduce((s,it)=>s+it.cantidad*it.precio,0); const total=round10(sub*m.f);
+  const bajos=items.filter(it=>{ const p=DB.productos.find(x=>x.id===it.id); return p && it.cantidad>p.stock; });
+  if(bajos.length && !confirm('Algún producto no tiene stock suficiente. ¿Vender igual?')) return;
+  const rubro = items.some(it=>it.rubro==='lubricentro')?'lubricentro':'turbo';
+  DB.ventas.push({id:uid(),fecha:todayISO(),rubro,cliente:'Consumidor final',vehiculo:'',metodo:m.name,recargo:m.f-1,
+    items:items.map(it=>({nombre:it.nombre,cantidad:it.cantidad,precio:it.precio})), total});
+  items.forEach(it=>{ const p=DB.productos.find(x=>x.id===it.id); if(p) p.stock=+(p.stock-it.cantidad).toFixed(3); });
+  save(); closeModal(); render(); toast(`✅ Venta ${m.name} — ${money(total)} · ${items.length} producto(s)`);
+}
+
 function posPanel(){
   return `
   <div class="panel">
-    <div class="pos-head"><h3>⚡ Punto de Venta Rápido</h3></div>
+    <div class="pos-head"><h3>⚡ Punto de Venta Rápido</h3>
+      <button class="btn" onclick="openCart()">🛒 Vender varios productos</button></div>
     <div class="pos-body">
       <div class="pos-search">
         <input id="posQ" autocomplete="off" placeholder="Buscar producto para vender (nombre o código)…"
