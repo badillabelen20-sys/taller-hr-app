@@ -835,7 +835,7 @@ function rowsRecepcion(list){
 }
 
 /* ---- CLIENTES ---- */
-function lubriKey(v){ return (v.patente||'').trim() || v.vehiculo || v.cliente || 'Sin identificar'; }
+function lubriKey(v){ return (v.patente||'').trim() || (v.cliente||'').trim() || v.vehiculo || 'Sin identificar'; }
 function turboKey(r){ return (r.cliente||'').trim() || 'Sin nombre'; }
 function viewClientes(){
   const esTurbo = clientFilter==='turbo';
@@ -852,19 +852,19 @@ function viewClientes(){
     // Clientes de lubricentro = de los Services (no las ventas de mostrador)
     DB.ventas.filter(v=>v.rubro==='lubricentro' && v.tipo==='service').forEach(v=>{
       const k=lubriKey(v);
-      map[k]=map[k]||{clave:k,nombre:v.vehiculo||v.cliente||'',patente:v.patente||'',tel:'',km:0,n:0,tot:0,last:''};
-      const g=map[k]; g.n++; g.tot+=v.total; if(v.telefono)g.tel=v.telefono; if(v.patente)g.patente=v.patente;
+      map[k]=map[k]||{clave:k,nombre:v.cliente||v.vehiculo||'',vehiculo:v.vehiculo||'',patente:v.patente||'',tel:'',km:0,n:0,tot:0,last:''};
+      const g=map[k]; g.n++; g.tot+=v.total; if(v.telefono)g.tel=v.telefono; if(v.patente)g.patente=v.patente; if(v.vehiculo)g.vehiculo=v.vehiculo;
       if((v.kilometros||0)>g.km)g.km=v.kilometros||0;
-      if(v.fecha>=g.last){ g.last=v.fecha; if(v.vehiculo)g.nombre=v.vehiculo; }
+      if(v.fecha>=g.last){ g.last=v.fecha; if(v.cliente)g.nombre=v.cliente; }
     });
   }
   const list=Object.values(map).sort((a,b)=>b.last.localeCompare(a.last));
 
   const head = esTurbo
     ? `<tr><th>Cliente</th><th>Teléfono</th><th>Vehículo (turbo)</th><th>Notas</th><th class="right">Turbos</th><th>Última visita</th></tr>`
-    : `<tr><th>Vehículo</th><th>Patente</th><th>Teléfono</th><th class="right">Últimos km</th><th class="right">Services</th><th class="right">Total</th><th>Última visita</th></tr>`;
+    : `<tr><th>Cliente</th><th>Vehículo</th><th>Patente</th><th>Teléfono</th><th class="right">Últimos km</th><th class="right">Services</th><th class="right">Total</th><th>Última visita</th></tr>`;
 
-  const nameCell = c => `<td class="cell-name"><div class="thumb">${esTurbo?'👤':'🚗'}</div>
+  const nameCell = c => `<td class="cell-name"><div class="thumb">${esTurbo?'👤':'👤'}</div>
       <div><a class="linkname" onclick="openClient('${b64(c.clave)}')">${c.nombre||'—'}</a>
       <div class="sub">${c.tel?('📞 '+c.tel):'<span class="muted">sin teléfono</span>'}</div></div></td>`;
 
@@ -876,13 +876,14 @@ function viewClientes(){
         <td class="right mono">${c.n}</td>
         <td class="muted mono">${fmtDate(c.last)}</td></tr>`
     : `<tr>${nameCell(c)}
+        <td class="muted">${c.vehiculo||'—'}</td>
         <td class="mono">${c.patente||'—'}</td>
         <td class="mono">${c.tel||'—'}</td>
         <td class="right mono">${c.km?num(c.km)+' km':'—'}</td>
         <td class="right mono">${c.n}</td>
         <td class="right strong mono">${money(c.tot)}</td>
         <td class="muted mono">${fmtDate(c.last)}</td></tr>`).join('')
-    : `<tr><td colspan="${esTurbo?6:7}"><div class="empty"><div class="big">👥</div>${esTurbo?'Todavía no hay clientes de turbos. Se registran desde <b>Recepción de Turbos</b>.':'Todavía no hay clientes de lubricentro. Se registran al hacer un <b>Nuevo Service</b>.'}</div></td></tr>`;
+    : `<tr><td colspan="${esTurbo?6:8}"><div class="empty"><div class="big">👥</div>${esTurbo?'Todavía no hay clientes de turbos. Se registran desde <b>Recepción de Turbos</b>.':'Todavía no hay clientes de lubricentro. Se registran al hacer un <b>Nuevo Service</b>.'}</div></td></tr>`;
 
   return `
   <div class="page-head"><div><h1>Clientes</h1><p>Registro de clientes por sus services (lubricentro) y turbos recibidos</p></div></div>
@@ -926,7 +927,7 @@ function openClient(enc){
     if(!svs.length) return;
     n=svs.length;
     svs.forEach(v=>{ if(v.telefono&&!tel)tel=v.telefono; if(v.vehiculo)veh.add(v.vehiculo); if(v.patente)patente=v.patente; if((v.kilometros||0)>km)km=v.kilometros; total+=v.total; });
-    nombre=svs.find(v=>v.vehiculo)?.vehiculo||key; last=svs[0].fecha;
+    nombre=svs.find(v=>v.cliente)?.cliente||svs.find(v=>v.vehiculo)?.vehiculo||key; last=svs[0].fecha;
     items=svs.map(v=>{
       const insumos=(v.insumos||[]).map(i=>`${i.cantidad>1?i.cantidad+'× ':''}${i.nombre}`).join(', ');
       return `<div class="op"><div class="op-ic">🛢️</div><div class="op-main">
@@ -970,18 +971,19 @@ function clientMatches(key){
 function openClientEdit(enc){
   const key=unb64(enc), esTurbo=clientFilter==='turbo';
   const {recs,svs}=clientMatches(key); const s=(esTurbo?recs[0]:svs[0])||{};
-  const nombre = esTurbo?(s.cliente||key):(s.vehiculo||s.cliente||'');
+  const nombre = s.cliente||key;
   $('#modalRoot').innerHTML=`
   <div class="modal" style="max-width:480px">
     <div class="modal-head"><div><h2>Editar cliente</h2><p>Se aplica a sus ${esTurbo?recs.length+' turbo(s)':svs.length+' service(s)'}</p></div>
       <button class="x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <input type="hidden" id="ce-key" value="${enc}">
-      <div class="field"><label>${esTurbo?'Nombre del cliente':'Vehículo'}</label><input id="ce-nombre" value="${(nombre||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Nombre del cliente</label><input id="ce-nombre" value="${(nombre||'').replace(/"/g,'&quot;')}"></div>
       <div class="grid2">
-        <div class="field"><label>${esTurbo?'Vehículo del turbo':'Patente'}</label><input id="ce-extra" value="${((esTurbo?s.vehiculo:s.patente)||'').replace(/"/g,'&quot;')}"></div>
-        <div class="field"><label>Teléfono</label><input id="ce-tel" value="${(s.telefono||'').replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>${esTurbo?'Vehículo del turbo':'Vehículo'}</label><input id="ce-veh" value="${(s.vehiculo||'').replace(/"/g,'&quot;')}"></div>
+        ${esTurbo?'':`<div class="field"><label>Patente</label><input id="ce-patente" value="${(s.patente||'').replace(/"/g,'&quot;')}" style="text-transform:uppercase"></div>`}
       </div>
+      <div class="field"><label>Teléfono</label><input id="ce-tel" value="${(s.telefono||'').replace(/"/g,'&quot;')}"></div>
       <p class="qty-hint">Los cambios se aplican a todas las operaciones de este cliente.</p>
     </div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button>
@@ -991,10 +993,11 @@ function openClientEdit(enc){
 }
 function saveClientEdit(){
   const enc=$('#ce-key').value, key=unb64(enc), esTurbo=clientFilter==='turbo';
-  const nombre=$('#ce-nombre').value.trim(), extra=$('#ce-extra').value.trim(), tel=$('#ce-tel').value.trim();
+  const nombre=$('#ce-nombre').value.trim(), veh=$('#ce-veh').value.trim(), tel=$('#ce-tel').value.trim();
+  const patente=$('#ce-patente')?$('#ce-patente').value.trim().toUpperCase():'';
   const {recs,svs}=clientMatches(key);
-  if(esTurbo) recs.forEach(r=>{ r.cliente=nombre; if(extra)r.vehiculo=extra; r.telefono=tel; });
-  else svs.forEach(v=>{ if(nombre)v.vehiculo=nombre; v.patente=extra.toUpperCase(); v.telefono=tel; });
+  if(esTurbo) recs.forEach(r=>{ r.cliente=nombre; if(veh)r.vehiculo=veh; r.telefono=tel; });
+  else svs.forEach(v=>{ v.cliente=nombre; if(veh)v.vehiculo=veh; v.patente=patente; v.telefono=tel; });
   save(); closeModal(); render(); toast('✅ Cliente actualizado');
 }
 function delClient(enc){
@@ -1703,6 +1706,7 @@ function serviceModalHTML(){
     <div class="modal-head"><div><h2>🛢️ Nuevo Service</h2><p>Cambio de aceite / service de lubricentro</p></div>
       <button class="x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
+      <div class="field"><label>Cliente (nombre y apellido) *</label><input id="s-cliente" placeholder="Nombre del cliente" autocomplete="off"></div>
       <div class="grid3">
         <div class="field"><label>Fecha</label><input type="date" id="s-fecha" value="${todayISO()}"></div>
         <div class="field"><label>Patente</label><input id="s-patente" placeholder="AB123CD" style="text-transform:uppercase"></div>
@@ -1744,13 +1748,15 @@ function delSvcRow(i){ svcCart.splice(i,1); if(!svcCart.length)svcCart.push({nom
 
 function saveService(){
   const monto=+$('#s-monto').value||0;
+  const cliente=$('#s-cliente').value.trim();
   const vehiculo=$('#s-vehiculo').value.trim();
   const patente=$('#s-patente').value.trim().toUpperCase();
+  if(!cliente){ toast('Ingresá el nombre del cliente.'); return; }
   if(monto<=0){ toast('Ingresá el monto cobrado.'); return; }
   const insumos=svcCart.filter(it=>(it.nombre||'').trim()&&parseFloat((it.cantidad||'').toString().replace(',','.'))>0)
     .map(it=>{ const p=resolveLubri(it.nombre); return {nombre:p?p.nombre:it.nombre.trim(), sku:p?(p.sku||''):'', cantidad:+parseFloat(it.cantidad.toString().replace(',','.'))}; });
   const venta={id:uid(),fecha:$('#s-fecha').value||todayISO(),rubro:'lubricentro',tipo:'service',
-    cliente:(vehiculo||patente||'Consumidor final'),vehiculo,patente,telefono:$('#s-telefono').value.trim(),kilometros:+$('#s-km').value||0,
+    cliente,vehiculo,patente,telefono:$('#s-telefono').value.trim(),kilometros:+$('#s-km').value||0,
     metodo:$('#s-metodo').value, items:[{nombre:'Service / cambio de aceite'+(patente?' — '+patente:''),cantidad:1,precio:monto}],
     insumos, total:monto};
   DB.ventas.push(venta);
