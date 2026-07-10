@@ -54,7 +54,7 @@ const NUMFIELDS = {
 const emptyDB = () => ({productos:[],proveedores:[],compras:[],ventas:[],recepciones:[],gastos:[],movimientos:[],usuarios:[]});
 let DB = emptyDB();
 
-function toRow(t,o){ const fm=FIELDMAP[t]||{}, r={}; for(const k in o){ if(o[k]===undefined)continue; r[fm[k]||k]=o[k]; } return r; }
+function toRow(t,o){ const fm=FIELDMAP[t]||{}, r={}; for(const k in o){ if(o[k]===undefined)continue; let v=o[k]; if(v==='') v=null; r[fm[k]||k]=v; } return r; }
 function toApp(t,r){ const fm=FIELDMAP[t]||{}, inv={}; for(const k in fm) inv[fm[k]]=k; const o={};
   for(const k in r){ if(k==='created_at')continue; o[inv[k]||k]=r[k]; }
   (NUMFIELDS[t]||[]).forEach(f=>{ if(o[f]!=null && o[f]!=='') o[f]=Number(o[f]); });
