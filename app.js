@@ -243,6 +243,19 @@ function gastosPeriodo({year, month}={}){
     if(month!=null && d.getMonth()!==month) return false; return true;
   }).reduce((s,g)=>s+(+g.monto||0),0);
 }
+// Ingresos por medio de pago
+const METODOS=['Efectivo','Transferencia','Débito','Crédito','Cuenta corriente'];
+function ingresosPorMetodo({rubro, year, month}={}){
+  const r={}; METODOS.forEach(m=>r[m]=0); r['Otro']=0;
+  DB.ventas.forEach(v=>{
+    if(rubro && v.rubro!==rubro) return;
+    const d=new Date(v.fecha+'T00:00:00');
+    if(year!=null && d.getFullYear()!==year) return;
+    if(month!=null && d.getMonth()!==month) return;
+    const m=v.metodo; if(m && r[m]!=null) r[m]+=v.total; else r['Otro']+=v.total;
+  });
+  return r;
+}
 
 /* ================= Router / navegación ================= */
 let current = 'inicio';
@@ -458,7 +471,7 @@ function viewVentas(){
       <button class="btn primary" onclick="openSale()">＋ Nueva venta</button>
     </div>
   </div>
-  ${posPanel()}
+  ${cartPanel()}
   <div class="panel" style="margin-top:16px">
     <div class="panel-tools">
       <div class="mini-search">${iconSearch()}<input id="qVenta" placeholder="Buscar por cliente, vehículo o ítem"></div>
@@ -626,7 +639,7 @@ function viewDiario(){
       <table><tbody>${groups[f].map(v=>`
         <tr>
           <td class="cell-name" style="width:34%"><div class="thumb">${ico(esRep?'🔧':'🛢️')}</div>
-            <div><div class="t">${esRep?(v.items[0]?v.items[0].nombre:'—'):(v.cliente||'Consumidor final')}</div><div class="sub">${esRep?(v.cliente&&v.cliente!=='Repuesto usado'?v.cliente:'Repuesto usado'):(v.vehiculo||'—')}</div></div></td>
+            <div><div class="t">${esRep?(v.items[0]?v.items[0].nombre:'—'):(v.cliente||'Consumidor final')}</div><div class="sub">${esRep?('Cód: '+((v.items[0]&&v.items[0].sku)||'—')+((v.cliente&&v.cliente!=='Repuesto usado')?' · '+v.cliente:'')):(v.vehiculo||'—')}</div></div></td>
           ${esRep
             ? `<td class="muted">Cant: ${v.items.map(i=>num(i.cantidad)).join(', ')}</td><td class="muted mono" style="width:120px">${fmtDate(v.fecha)}</td><td class="right"><button class="rowbtn del" onclick="delVenta('${v.id}')">Quitar</button></td>`
             : `<td class="muted">${v.items.map(i=>`${i.cantidad>1?i.cantidad+'× ':''}${i.nombre}`).join(', ')}</td><td class="muted" style="width:120px">${v.metodo||'—'}</td><td class="right strong mono" style="width:130px">${money(v.total)}</td>`}
@@ -679,8 +692,8 @@ function openRepuesto(){
         <div class="field"><label>Cantidad usada</label><input type="number" min="0" step="any" id="rp-cant" value="1"></div>
       </div>
       <div class="field"><label>Repuesto de turbo</label>
-        <input id="rp-prod" list="turbolist2" placeholder="Buscá por nombre o código…" autocomplete="off">
-        <datalist id="turbolist2">${turboProdOptions()}</datalist></div>
+        <input id="rp-prod" list="turbolist2" placeholder="Buscá por código o nombre…" autocomplete="off">
+        <datalist id="turbolist2">${turboProdOptionsCode()}</datalist></div>
       <div class="field"><label>¿Para qué turbo? (opcional)</label><input id="rp-nota" placeholder="Ej: reparación turbo Amarok de Pérez"></div>
     </div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button>
@@ -689,15 +702,16 @@ function openRepuesto(){
   showModal();
 }
 function saveRepuesto(){
-  const nombre=$('#rp-prod').value.trim();
+  const txt=$('#rp-prod').value.trim();
   const cant=parseFloat(($('#rp-cant').value||'').toString().replace(',','.'))||0;
-  if(!nombre){ toast('Elegí un repuesto de la lista.'); return; }
+  if(!txt){ toast('Elegí un repuesto de la lista.'); return; }
   if(!(cant>0)){ toast('Ingresá la cantidad usada.'); return; }
-  const p=DB.productos.find(x=>x.rubro==='turbo' && x.nombre===nombre);
+  const p=resolveTurbo(txt);
+  const nombre=p?p.nombre:txt; const sku=p?(p.sku||''):'';
   const fecha=$('#rp-fecha').value||todayISO();
   const nota=$('#rp-nota').value.trim();
   if(p && cant>p.stock && !confirm(`Stock insuficiente (${num(p.stock)} disponibles). ¿Registrar igual?`)) return;
-  DB.ventas.push({id:uid(),fecha,rubro:'turbo',tipo:'repuesto',cliente:nota||'Repuesto usado',vehiculo:'',metodo:'—',total:0,items:[{nombre,cantidad:cant,precio:0}]});
+  DB.ventas.push({id:uid(),fecha,rubro:'turbo',tipo:'repuesto',cliente:nota||'Repuesto usado',vehiculo:'',metodo:'—',total:0,items:[{nombre,sku,cantidad:cant,precio:0}]});
   if(p) p.stock=+(p.stock-cant).toFixed(3);
   DB.movimientos.push({id:uid(),fecha,productoId:p?p.id:null,nombre,rubro:'turbo',cantidad:cant,motivo:'Repuesto usado'+(nota?' — '+nota:'')});
   save(); closeModal(); render(); toast(`🔧 ${num(cant)} u. de ${nombre} descontadas del stock`);
@@ -761,6 +775,19 @@ function viewResumen(){
       <div><div class="csub">= GANANCIA NETA (año)</div><div class="strong mono" style="font-size:22px;color:${netaTot>=0?'var(--green)':'var(--red)'}">${money(netaTot)}</div></div>
     </div>
   </div>
+  ${(function(){
+    const mkRow=(lbl,rub)=>{ const p=ingresosPorMetodo({rubro:rub,year:y}); const tot=METODOS.reduce((s,m)=>s+p[m],0)+p['Otro'];
+      return `<tr><td class="strong">${lbl}</td>${METODOS.map(m=>`<td class="right mono">${money(p[m])}</td>`).join('')}<td class="right strong mono">${money(tot)}</td></tr>`; };
+    return `
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-tools"><strong>Ingresos por medio de pago — ${y}</strong></div>
+      <table>
+        <thead><tr><th>Rubro</th>${METODOS.map(m=>`<th class="right">${m}</th>`).join('')}<th class="right">Total</th></tr></thead>
+        <tbody>${mkRow('🌀 Turbos','turbo')}${mkRow('🛢️ Lubricentro','lubricentro')}</tbody>
+        <tfoot><tr style="background:#fbfbfa"><td class="strong">TOTAL</td>${(function(){const p=ingresosPorMetodo({year:y});const tot=METODOS.reduce((s,m)=>s+p[m],0)+p['Otro'];return METODOS.map(m=>`<td class="right strong mono">${money(p[m])}</td>`).join('')+`<td class="right strong mono">${money(tot)}</td>`;})()}</tr></tfoot>
+      </table>
+    </div>`;
+  })()}
   <div class="two-col">
     <div class="card">
       <h3>Evolución mensual ${y}</h3><div class="csub">Turbos vs. Lubricentro</div>
@@ -1072,7 +1099,7 @@ function viewProveedores(){
     {ic:'⏳', lbl:'Saldo pendiente', val:money(pendiente), delta:pendiente?'A pagar':'OK', up:pendiente===0, per:'Impago'},
     {ic:'📦', lbl:'Compras (mes)', val:num(comprasMes.length), delta:'', up:true, per:MES[m]},
   ])}
-  <div class="two-col" style="grid-template-columns:1fr 1.4fr;margin-top:0">
+  <div class="two-col" style="grid-template-columns:1fr;margin-top:0">
     <div class="panel">
       <div class="panel-tools"><strong>Proveedores</strong></div>
       <table><thead><tr><th>Nombre</th><th>Teléfono</th><th class="right">Pendiente</th><th></th></tr></thead>
@@ -1318,6 +1345,7 @@ function wireView(){
     l=l.filter(r=>(r.cliente||'').toLowerCase().includes(t)||(r.vehiculo||'').toLowerCase().includes(t)||(r.telefono||'').toLowerCase().includes(t));
     l.sort((a,b)=>b.ingreso.localeCompare(a.ingreso));
     $('#recBody').innerHTML=rowsRecepcion(l); };
+  if($('#cartRowsPos')) renderCartPos();   // pinta el carrito del Punto de Venta
 }
 
 /* ================= PUNTO DE VENTA RÁPIDO ================= */
@@ -1331,25 +1359,37 @@ function resolveProd(txt){ txt=(txt||'').trim(); if(!txt)return null; const t=tx
       || DB.productos.find(p=>p.sku&&p.sku.toLowerCase()===t)
       || DB.productos.find(p=>p.nombre.toLowerCase()===t) || null;
 }
-function openCart(){ cartPos=[]; $('#modalRoot').innerHTML=`
-  <div class="modal" style="max-width:660px">
-    <div class="modal-head"><div><h2>🛒 Venta de varios productos</h2><p>Cargá los productos y cobrá con el total según el medio de pago</p></div>
-      <button class="x" onclick="closeModal()">✕</button></div>
-    <div class="modal-body">
-      <div class="pos-search" style="margin-bottom:12px">
-        <input id="cartSearch" list="cartlist" placeholder="Buscar producto por nombre o código, y Enter…" autocomplete="off" onchange="cartAddFromInput(this)">
-        <datalist id="cartlist">${allProdOptions()}</datalist>
+function cartPanel(){
+  return `
+  <div class="panel pos-panel">
+    <div class="pos-head"><h3>🛒 Punto de Venta</h3>
+      <button class="btn" onclick="openConsulta()">🔎 Consultar precios</button></div>
+    <div class="pos-body">
+      <div class="pos-search">
+        <input id="cartQ" autocomplete="off" placeholder="Buscar producto por código o nombre para agregar…" oninput="cartSuggest(this.value)" onfocus="cartSuggest(this.value)">
+        <div id="cartResults" class="pos-results hide"></div>
       </div>
-      <div id="cartRowsPos"></div>
+      <div id="cartRowsPos" style="margin-top:12px"></div>
       <div class="tot-line big"><span>Subtotal (lista)</span><span id="cartPosSub" class="mono">$0</span></div>
-      <h4 style="margin:16px 0 8px">Elegí el medio de pago para cobrar</h4>
+      <h4 style="margin:14px 0 8px">Cobrá con el medio de pago:</h4>
       <div class="pay-grid" id="cartPayGrid"></div>
     </div>
-    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cerrar</button></div>
   </div>`;
-  showModal(); renderCartPos(); const s=$('#cartSearch'); if(s) s.focus();
 }
-function cartAddFromInput(inp){ const p=resolveProd(inp.value); if(p){ cartPosAdd(p.id); inp.value=''; } if(inp) inp.focus(); }
+function cartSuggest(v){
+  const box=$('#cartResults'); if(!box) return; const t=(v||'').trim().toLowerCase();
+  if(!t){ box.classList.add('hide'); box.innerHTML=''; return; }
+  const res=DB.productos.filter(p=>p.nombre.toLowerCase().includes(t)||(p.sku||'').toLowerCase().includes(t)).slice(0,10);
+  if(!res.length){ box.innerHTML='<button disabled style="color:var(--muted)">Sin coincidencias</button>'; box.classList.remove('hide'); return; }
+  box.innerHTML=res.map(p=>{const e=estadoStock(p);return `
+    <button onmousedown="event.preventDefault();cartSelect('${p.id}')">
+      <span>${ico(p.rubro==='turbo'?'🌀':'🛢️')}</span>
+      <span><div class="pr-name">${p.nombre}</div><div class="pr-sub">${p.sku||''} · Stock: ${num(p.stock)} · <span style="color:${e.cls==='ok'?'var(--green)':e.cls==='warn'?'var(--amber)':'var(--red)'}">${e.txt}</span></div></span>
+      <span class="pr-price">${money(p.precio)}</span>
+    </button>`}).join('');
+  box.classList.remove('hide');
+}
+function cartSelect(id){ cartPosAdd(id); const q=$('#cartQ'); if(q){ q.focus(); q.select(); } }
 function cartPosAdd(id){ const p=DB.productos.find(x=>x.id===id); if(!p)return; const ex=cartPos.find(x=>x.id===id);
   if(ex) ex.cantidad++; else cartPos.push({id:p.id,nombre:p.nombre,sku:p.sku||'',precio:+p.precio||0,rubro:p.rubro,cantidad:1}); renderCartPos(); }
 function cartPosSet(i,k,v){ const n=Math.max(0,parseFloat((v||'').toString().replace(',','.'))||0); cartPos[i][k]=n;
@@ -1387,14 +1427,61 @@ function venderCart(key){
   DB.ventas.push({id:uid(),fecha:todayISO(),rubro,cliente:'Consumidor final',vehiculo:'',metodo:m.name,recargo:m.f-1,
     items:items.map(it=>({nombre:it.nombre,cantidad:it.cantidad,precio:it.precio})), total});
   items.forEach(it=>{ const p=DB.productos.find(x=>x.id===it.id); if(p) p.stock=+(p.stock-it.cantidad).toFixed(3); });
-  save(); closeModal(); render(); toast(`✅ Venta ${m.name} — ${money(total)} · ${items.length} producto(s)`);
+  cartPos=[]; save(); render(); toast(`✅ Venta ${m.name} — ${money(total)} · ${items.length} producto(s)`);
+}
+
+/* ===== Consultar precios (solo ver, no vende) ===== */
+function openConsulta(){
+  $('#modalRoot').innerHTML=`
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head"><div><h2>🔎 Consultar precios</h2><p>Buscá un producto y mirá el precio en cada medio de pago</p></div>
+      <button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="pos-search" style="margin-bottom:6px">
+        <input id="csQ" autocomplete="off" placeholder="Buscar por código o nombre…" oninput="csSuggest(this.value)" onfocus="csSuggest(this.value)">
+        <div id="csResults" class="pos-results hide"></div>
+      </div>
+      <div id="csCard"><div class="pos-empty">Buscá un producto arriba para ver sus precios.</div></div>
+    </div>
+    <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>
+  </div>`;
+  showModal(); const q=$('#csQ'); if(q) q.focus();
+}
+function csSuggest(v){
+  const box=$('#csResults'); if(!box) return; const t=(v||'').trim().toLowerCase();
+  if(!t){ box.classList.add('hide'); box.innerHTML=''; return; }
+  const res=DB.productos.filter(p=>p.nombre.toLowerCase().includes(t)||(p.sku||'').toLowerCase().includes(t)).slice(0,10);
+  if(!res.length){ box.innerHTML='<button disabled style="color:var(--muted)">Sin coincidencias</button>'; box.classList.remove('hide'); return; }
+  box.innerHTML=res.map(p=>`
+    <button onmousedown="event.preventDefault();csSelect('${p.id}')">
+      <span>${ico(p.rubro==='turbo'?'🌀':'🛢️')}</span>
+      <span><div class="pr-name">${p.nombre}</div><div class="pr-sub">${p.sku||''} · Stock: ${num(p.stock)}</div></span>
+      <span class="pr-price">${money(p.precio)}</span>
+    </button>`).join('');
+  box.classList.remove('hide');
+}
+function csSelect(id){ const p=DB.productos.find(x=>x.id===id); if(!p) return;
+  const box=$('#csResults'); if(box){ box.classList.add('hide'); box.innerHTML=''; }
+  const q=$('#csQ'); if(q) q.value=p.nombre;
+  const c=$('#csCard'); if(c) c.innerHTML=csCardHTML(p);
+}
+function csCardHTML(p){
+  const e=estadoStock(p);
+  return `<div class="pos-card">
+    <div class="pc-name">${p.nombre}</div>
+    <div class="pc-code">Código: ${p.sku||'—'} · <span class="tag ${p.rubro==='turbo'?'turbo':'lubri'}">${p.rubro==='turbo'?'Turbos':'Lubricentro'}</span></div>
+    <div class="pc-stock" style="margin-top:6px"><span class="pill ${e.cls}">${e.txt}</span> <span class="muted mono">Disponible: ${num(p.stock)} u. · Lista: ${money(p.precio)}</span></div>
+    <div class="pay-grid" style="margin-top:14px">
+      ${PAY.map(m=>`<div class="pay ${m.cls}"><div class="p-lbl">${m.lbl}</div><div class="p-amt">${money(round10(p.precio*m.f))}</div></div>`).join('')}
+    </div>
+  </div>`;
 }
 
 function posPanel(){
   return `
   <div class="panel pos-panel">
     <div class="pos-head"><h3>⚡ Punto de Venta Rápido</h3>
-      <button class="btn" onclick="openCart()">🛒 Vender varios productos</button></div>
+      <button class="btn" onclick="openConsulta()">🔎 Consultar precios</button></div>
     <div class="pos-body">
       <div class="pos-search">
         <input id="posQ" autocomplete="off" placeholder="Buscar producto para vender (nombre o código)…"
@@ -1667,6 +1754,10 @@ function delProducto(id){ if(!confirm('¿Eliminar este producto del inventario?'
 /* ================= Modal: RECEPCIÓN DE TURBOS ================= */
 let recCart=[];
 function turboProdOptions(){ return DB.productos.filter(p=>p.rubro==='turbo').map(p=>`<option value="${p.nombre.replace(/"/g,'&quot;')}">${p.nombre} — stock ${num(p.stock)}</option>`).join(''); }
+function turboLabel(p){ const code=(p.sku&&p.sku!==p.nombre)?p.sku:''; return code?(code+' — '+p.nombre):p.nombre; }
+function turboProdOptionsCode(){ return DB.productos.filter(p=>p.rubro==='turbo').map(p=>`<option value="${turboLabel(p).replace(/"/g,'&quot;')}">${turboLabel(p)} · stock ${num(p.stock)}</option>`).join(''); }
+function resolveTurbo(txt){ txt=(txt||'').trim(); if(!txt)return null; const t=txt.toLowerCase(), ps=DB.productos.filter(p=>p.rubro==='turbo');
+  return ps.find(p=>turboLabel(p).toLowerCase()===t)||ps.find(p=>p.sku&&p.sku.toLowerCase()===t)||ps.find(p=>p.nombre.toLowerCase()===t)||ps.find(p=>p.sku&&t.startsWith(p.sku.toLowerCase()))||null; }
 function ajustarStockTurbo(prods,signo){ (prods||[]).forEach(it=>{ const p=DB.productos.find(x=>x.rubro==='turbo'&&x.nombre===it.nombre); if(p) p.stock=+(p.stock+signo*it.cantidad).toFixed(3); }); }
 
 /* Sincroniza una recepción entregada + pagada como venta en el libro diario de turbos */
@@ -1992,9 +2083,8 @@ function delGasto(id){ if(!confirm('¿Eliminar este gasto?'))return; DB.gastos=D
 /* ================= Modal helpers ================= */
 function showModal(){ $('#modalBack').classList.add('show'); }
 function closeModal(){ $('#modalBack').classList.remove('show'); $('#modalRoot').innerHTML=''; }
-$('#modalBack')?.addEventListener('click',e=>{ if(e.target.id==='modalBack') closeModal(); });
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
-document.addEventListener('click',e=>{ const box=$('#posResults'); if(box && !e.target.closest('.pos-search')) box.classList.add('hide'); });
+// Los formularios se cierran SOLO con la X o el botón Cerrar/Cancelar (no al hacer clic afuera ni con Escape)
+document.addEventListener('click',e=>{ if(!e.target.closest('.pos-search')) $$('.pos-results').forEach(b=>b.classList.add('hide')); });
 
 /* ================= Exportar CSV ================= */
 function exportCSV(kind){
