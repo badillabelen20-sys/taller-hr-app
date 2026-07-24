@@ -201,6 +201,8 @@ function estadoStock(p){
   if(p.stock<=p.stockMin) return {cls:'warn', txt:'Stock bajo'};
   return {cls:'ok', txt:'En stock'};
 }
+// Un "repuesto usado en turbo" NO es una venta (no cuenta como recaudado)
+function esRepuestoTurbo(v){ return v.rubro==='turbo' && v.tipo!=='service' && v.origen!=='recepcion' && (v.tipo==='repuesto' || (+v.total||0)===0); }
 function ventasFiltro(rubro){
   let v = [...DB.ventas];
   if(rubro && rubro!=='todos') v = v.filter(x=>x.rubro===rubro);
@@ -208,6 +210,7 @@ function ventasFiltro(rubro){
 }
 function totalPeriodo({rubro, year, month}={}){
   return DB.ventas.filter(v=>{
+    if(esRepuestoTurbo(v)) return false;
     if(rubro && v.rubro!==rubro) return false;
     const d=new Date(v.fecha+'T00:00:00');
     if(year!=null && d.getFullYear()!==year) return false;
@@ -217,6 +220,7 @@ function totalPeriodo({rubro, year, month}={}){
 }
 function countPeriodo({rubro, year, month}={}){
   return DB.ventas.filter(v=>{
+    if(esRepuestoTurbo(v)) return false;
     if(rubro && v.rubro!==rubro) return false;
     const d=new Date(v.fecha+'T00:00:00');
     if(year!=null && d.getFullYear()!==year) return false;
@@ -254,6 +258,7 @@ const METODOS=['Efectivo','Transferencia','Débito','Crédito','Cuenta corriente
 function ingresosPorMetodo({rubro, year, month}={}){
   const r={}; METODOS.forEach(m=>r[m]=0); r['Otro']=0;
   DB.ventas.forEach(v=>{
+    if(esRepuestoTurbo(v)) return;
     if(rubro && v.rubro!==rubro) return;
     const d=new Date(v.fecha+'T00:00:00');
     if(year!=null && d.getFullYear()!==year) return;
@@ -426,6 +431,7 @@ function barChart(year){
 function topList(year,month){
   const acc={};
   DB.ventas.forEach(v=>{
+    if(esRepuestoTurbo(v)) return;
     const d=new Date(v.fecha+'T00:00:00');
     if(d.getFullYear()!==year||d.getMonth()!==month) return;
     v.items.forEach(it=>{ acc[it.nombre]=(acc[it.nombre]||0)+it.precio*it.cantidad; });
@@ -467,14 +473,13 @@ function alertasStock(){
 
 /* ---- VENTAS ---- */
 function viewVentas(){
-  const list = ventasFiltro(saleFilter);
+  const list = ventasFiltro(saleFilter).filter(v=>!esRepuestoTurbo(v));
   return `
   <div class="page-head">
     <div><h1>Ventas</h1><p>Registrá y consultá las ventas de turbos y lubricentro</p></div>
     <div class="actions">
       <button class="btn" onclick="exportCSV('ventas')">⭳ Exportar</button>
       <button class="btn service" onclick="openService()">🛢️ NUEVO SERVICE</button>
-      <button class="btn primary" onclick="openSale()">＋ Nueva venta</button>
     </div>
   </div>
   ${cartPanel()}
@@ -504,6 +509,7 @@ function rowsVentas(list){
       <td class="muted">${v.metodo||'—'}</td>
       <td class="right strong mono">${money(v.total)}</td>
       <td class="right" style="white-space:nowrap">
+        ${(v.rubro==='turbo'&&v.origen!=='recepcion')?`<button class="rowbtn" onclick="hacerRepuesto('${v.id}')" title="No es venta: pasarlo a Repuestos usados">→ Repuesto</button>`:''}
         <button class="rowbtn" onclick="openVentaEdit('${v.id}')">Editar</button>
         <button class="rowbtn del" onclick="delVenta('${v.id}')">Eliminar</button></td>
     </tr>`).join('');
@@ -627,7 +633,9 @@ function rowsStock(list){
 function viewDiario(){
   const rubro = diaryFilter;
   const esRep = rubro==='turbo';   // turbos = repuestos usados, no ventas
-  const list = ventasFiltro(rubro);
+  const list = esRep
+    ? DB.ventas.filter(esRepuestoTurbo).sort((a,b)=> b.fecha.localeCompare(a.fecha) || b.id.localeCompare(a.id))
+    : ventasFiltro(rubro).filter(v=>!esRepuestoTurbo(v));
   const now=new Date(), y=now.getFullYear(), m=now.getMonth();
   const rLbl = esRep?'Turbos':'Lubricentro';
   // agrupar por fecha
@@ -1352,7 +1360,7 @@ function seg(state, opts, cb){
 /* ================= Wiring de eventos por vista ================= */
 function wireView(){
   const qv=$('#qVenta'); if(qv) qv.oninput=()=>{ const t=qv.value.toLowerCase();
-    $('#ventasBody').innerHTML=rowsVentas(ventasFiltro(saleFilter).filter(v=>
+    $('#ventasBody').innerHTML=rowsVentas(ventasFiltro(saleFilter).filter(v=>!esRepuestoTurbo(v)).filter(v=>
       (v.cliente||'').toLowerCase().includes(t)||(v.vehiculo||'').toLowerCase().includes(t)||
       v.items.some(i=>i.nombre.toLowerCase().includes(t)))); };
   const qs=$('#qStock'); if(qs) qs.oninput=()=>{ const t=qs.value.toLowerCase();
@@ -1701,6 +1709,15 @@ function delVenta(id){
   (v.items||[]).forEach(it=>{ const p=DB.productos.find(x=>x.nombre===it.nombre&&x.rubro===v.rubro); if(p) p.stock=+(p.stock+it.cantidad).toFixed(3); });
   if(v.recepcionId){ const r=DB.recepciones.find(x=>x.id===v.recepcionId); if(r) r.ventaId=null; }
   DB.ventas=DB.ventas.filter(x=>x.id!==id); save(); render(); toast('Venta eliminada');
+}
+// Reclasifica una operación de turbo como "repuesto usado" (no es venta, no cuenta como recaudado)
+function hacerRepuesto(id){
+  const v=DB.ventas.find(x=>x.id===id); if(!v) return;
+  if(!confirm('¿Marcar esta operación como REPUESTO USADO?\nDeja de contar como venta y pasa a "Repuestos Turbos". El stock ya quedó descontado.')) return;
+  v.tipo='repuesto'; v.total=0; v.metodo='—'; v.origen=undefined;
+  if(!v.cliente || v.cliente==='Consumidor final') v.cliente='Repuesto usado';
+  (v.items||[]).forEach(it=>{ if(!it.sku){ const p=DB.productos.find(x=>x.rubro==='turbo'&&x.nombre===it.nombre); if(p) it.sku=p.sku||''; } it.precio=0; });
+  save(); render(); toast('🔧 Pasado a Repuestos usados');
 }
 
 /* ================= Modal: PRODUCTO ================= */
