@@ -238,7 +238,13 @@ function costoPeriodo({rubro, year, month}={}){
   return c;
 }
 function gastosPeriodo({year, month}={}){
-  return DB.gastos.filter(g=>{ const d=new Date(g.fecha+'T00:00:00');
+  return DB.gastos.filter(g=>{ if(g.tipo==='Retiro de efectivo') return false; const d=new Date(g.fecha+'T00:00:00');
+    if(year!=null && d.getFullYear()!==year) return false;
+    if(month!=null && d.getMonth()!==month) return false; return true;
+  }).reduce((s,g)=>s+(+g.monto||0),0);
+}
+function retirosPeriodo({year, month}={}){
+  return DB.gastos.filter(g=>{ if(g.tipo!=='Retiro de efectivo') return false; const d=new Date(g.fecha+'T00:00:00');
     if(year!=null && d.getFullYear()!==year) return false;
     if(month!=null && d.getMonth()!==month) return false; return true;
   }).reduce((s,g)=>s+(+g.monto||0),0);
@@ -832,6 +838,8 @@ function viewResumen(){
 /* ---- RECEPCIÓN DE TURBOS ---- */
 function daysBetween(aISO,bISO){ if(!aISO||!bISO) return 0; const a=new Date(aISO+'T00:00:00'),b=new Date(bISO+'T00:00:00'); return Math.max(0,Math.round((b-a)/86400000)); }
 function diasTaller(r){ const fin=(r.entregado&&r.entrega)?r.entrega:todayISO(); return daysBetween(r.ingreso,fin); }
+function costoRepuestosRec(r){ return (r.productos||[]).reduce((s,p)=>s+(+p.costo||0)*(+p.cantidad||0),0); }
+function gananciaNetaRec(r){ return (r.presupuestado?(+r.costoPresupuesto||0):0)-costoRepuestosRec(r); }
 
 function viewRecepcion(){
   const now=new Date(), y=now.getFullYear(), m=now.getMonth();
@@ -884,7 +892,7 @@ function rowsRecepcion(list){
       <td class="cell-name"><div class="thumb">${ico('🌀')}</div>
         <div><div class="t">${r.cliente||'—'}</div><div class="sub">${r.vehiculo||'—'} · ${r.telefono||'s/tel'}</div></div></td>
       <td class="muted mono">${fmtDate(r.ingreso)}</td>
-      <td class="right">${r.presupuestado?`<span class="strong mono">${money(r.costoPresupuesto)}</span>`:'<span class="muted">Sin presup.</span>'}</td>
+      <td class="right">${r.presupuestado?`<div class="strong mono">${money(r.costoPresupuesto)}</div>${costoRepuestosRec(r)>0?`<div class="sub" style="color:var(--green)">Neta: ${money(gananciaNetaRec(r))}</div>`:''}`:'<span class="muted">Sin presup.</span>'}</td>
       <td class="muted">${reps||'—'}</td>
       <td class="right mono ${!r.entregado&&dias>7?'':''}"><span class="pill ${r.entregado?'draft':(dias>7?'warn':'ok')}">${dias} d</span></td>
       <td>${r.entregado?'<span class="pill draft">Entregado</span>':'<span class="pill warn">En taller</span>'}</td>
@@ -1133,9 +1141,10 @@ function viewProveedores(){
 }
 
 /* ---- GASTOS ---- */
+const RETIRO_TIPO='Retiro de efectivo';
 function gastosDelMes(ym){
-  // Une gastos manuales + compras (mercadería) del mes
-  const manual=DB.gastos.filter(g=>monthKey(g.fecha)===ym).map(g=>({...g,estado:'Pagado',_tipo:'gasto'}));
+  // Une gastos manuales + compras (mercadería) del mes — los retiros de efectivo NO son gastos
+  const manual=DB.gastos.filter(g=>monthKey(g.fecha)===ym && g.tipo!==RETIRO_TIPO).map(g=>({...g,estado:'Pagado',_tipo:'gasto'}));
   const compras=DB.compras.filter(c=>monthKey(c.fecha)===ym).map(c=>({id:c.id,fecha:c.fecha,tipo:'Proveedor / Mercadería',
     detalle:nombreProveedor(c.proveedorId)+(c.detalle?' — '+c.detalle:''),monto:c.costo,metodo:c.metodo,
     estado:c.saldado?'Pagado':'Pendiente',_tipo:'compra'}));
@@ -1197,9 +1206,8 @@ function viewCaja(){
   const ingresoMes=ventasMes.reduce((s,v)=>s+v.total,0);
   const egresoMes=gastosMes.reduce((s,g)=>s+g.monto,0)+comprasMes.reduce((s,c)=>s+c.costo,0);
   const saldoMes=ingresoMes-egresoMes;
-  const hoy=todayISO();
-  const ingHoy=DB.ventas.filter(v=>v.fecha===hoy).reduce((s,v)=>s+v.total,0);
-  const egrHoy=DB.gastos.filter(g=>g.fecha===hoy).reduce((s,g)=>s+g.monto,0)+DB.compras.filter(c=>c.fecha===hoy&&c.saldado).reduce((s,c)=>s+c.costo,0);
+  const retirosMes=DB.gastos.filter(g=>g.tipo===RETIRO_TIPO && monthKey(g.fecha)===ym).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  const retiroMonto=retirosMes.reduce((s,g)=>s+(+g.monto||0),0);
 
   // agrupar por día
   const dias={};
@@ -1212,14 +1220,15 @@ function viewCaja(){
   <div class="page-head">
     <div><h1>Caja</h1><p>Movimiento diario de ingresos y egresos</p></div>
     <div class="actions">
+      <button class="btn primary" onclick="openRetiro()">🏧 Registrar retiro</button>
       <select class="btn" style="font-weight:600" onchange="cajaMonth=this.value;render()">${monthOptions(ym)}</select>
     </div>
   </div>
   ${statsRow([
     {ic:'📈', lbl:'Ingresos del mes', val:money(ingresoMes), delta:'', up:true, per:fmtMonth(ym)},
     {ic:'📉', lbl:'Egresos del mes', val:money(egresoMes), delta:'', up:false, per:fmtMonth(ym)},
-    {ic:'⚖️', lbl:'Saldo del mes', val:money(saldoMes), delta:saldoMes>=0?'Positivo':'Negativo', up:saldoMes>=0, per:fmtMonth(ym)},
-    {ic:'📅', lbl:'Saldo de hoy', val:money(ingHoy-egrHoy), delta:money(ingHoy)+' / '+money(egrHoy), up:(ingHoy-egrHoy)>=0, per:'Ingreso/Egreso'},
+    {ic:'🏧', lbl:'Retiros del mes', val:money(retiroMonto), delta:retirosMes.length?retirosMes.length+' retiro(s)':'', up:false, per:'Efectivo retirado'},
+    {ic:'⚖️', lbl:'Saldo del mes', val:money(saldoMes), delta:saldoMes>=0?'Positivo':'Negativo', up:saldoMes>=0, per:'Queda en caja'},
   ])}
   <div class="panel">
     <div class="panel-tools"><strong>Detalle diario — ${fmtMonth(ym)}</strong></div>
@@ -1240,7 +1249,18 @@ function viewCaja(){
         <td class="right strong mono" style="color:${saldoMes>=0?'var(--green)':'var(--red)'}">${money(saldoMes)}</td>
         <td></td></tr></tfoot>
     </table>
-  </div>`;
+  </div>
+  ${retirosMes.length?`
+  <div class="panel" style="margin-top:16px">
+    <div class="panel-tools"><strong>🏧 Retiros de efectivo — ${fmtMonth(ym)}</strong><span style="margin-left:auto" class="muted">Total retirado: <strong class="mono" style="color:var(--red)">${money(retiroMonto)}</strong></span></div>
+    <table>
+      <thead><tr><th>Fecha</th><th>Detalle / motivo</th><th class="right">Monto</th><th></th></tr></thead>
+      <tbody>${retirosMes.map(g=>`
+        <tr><td class="mono">${fmtDate(g.fecha)}</td><td class="muted">${g.detalle||'Retiro de efectivo'}</td>
+          <td class="right strong mono" style="color:var(--red)">${money(g.monto)}</td>
+          <td class="right"><button class="rowbtn del" onclick="delGasto('${g.id}')">✕</button></td></tr>`).join('')}</tbody>
+    </table>
+  </div>`:''}`;
 }
 
 /* ---- CONFIGURACIÓN ---- */
@@ -1389,7 +1409,7 @@ function cartSuggest(v){
     </button>`}).join('');
   box.classList.remove('hide');
 }
-function cartSelect(id){ cartPosAdd(id); const q=$('#cartQ'); if(q){ q.focus(); q.select(); } }
+function cartSelect(id){ cartPosAdd(id); const box=$('#cartResults'); if(box){ box.classList.add('hide'); box.innerHTML=''; } const q=$('#cartQ'); if(q){ q.focus(); q.select(); } }
 function cartPosAdd(id){ const p=DB.productos.find(x=>x.id===id); if(!p)return; const ex=cartPos.find(x=>x.id===id);
   if(ex) ex.cantidad++; else cartPos.push({id:p.id,nombre:p.nombre,sku:p.sku||'',precio:+p.precio||0,rubro:p.rubro,cantidad:1}); renderCartPos(); }
 function cartPosSet(i,k,v){ const n=Math.max(0,parseFloat((v||'').toString().replace(',','.'))||0); cartPos[i][k]=n;
@@ -1802,13 +1822,14 @@ function recepcionModalHTML(r){
           <select id="r-presup" onchange="document.getElementById('r-costo').disabled=(this.value!=='si')">
             <option value="no" ${e.presupuestado?'':'selected'}>No</option>
             <option value="si" ${e.presupuestado?'selected':''}>Sí</option></select></div>
-        <div class="field"><label>Costo del presupuesto ($)</label><input type="number" min="0" id="r-costo" value="${e.costoPresupuesto}" ${e.presupuestado?'':'disabled'} placeholder="0"></div>
+        <div class="field"><label>Precio al cliente / presupuesto ($)</label><input type="number" min="0" id="r-costo" value="${e.costoPresupuesto}" ${e.presupuestado?'':'disabled'} placeholder="0" oninput="recTotals()"></div>
       </div>
 
-      <div class="items-head"><h4>Repuestos de stock (turbos) utilizados</h4>
+      <div class="items-head"><h4>Repuestos utilizados (y su costo)</h4>
         <button class="btn sm" onclick="addRecRow()">＋ Agregar repuesto</button></div>
       <div id="recRows"></div>
-      <p class="qty-hint" style="margin:4px 0 14px">Al guardar, estos repuestos se descuentan del stock de turbos.</p>
+      <p class="qty-hint" style="margin:4px 0 8px">Elegí del stock (trae el costo solo) o escribilo a mano con su costo. Se descuenta del stock de turbos.</p>
+      <div id="recResumen" style="border-top:1px dashed var(--line);padding-top:8px;margin-bottom:12px"></div>
 
       <div class="grid2">
         <div class="field"><label>¿Entregado?</label>
@@ -1833,22 +1854,38 @@ function recepcionModalHTML(r){
 }
 function renderRecRows(){
   const cont=$('#recRows'); if(!cont) return;
-  cont.innerHTML = (recCart.length?recCart:[]).map((it,i)=>`
-    <div class="item-row" style="grid-template-columns:1fr 90px 34px">
-      <input list="turbolist" value="${(it.nombre||'').replace(/"/g,'&quot;')}" placeholder="Repuesto de turbo" oninput="recSet(${i},'nombre',this.value)">
-      <input type="number" min="0" step="any" value="${it.cantidad}" placeholder="Cant" oninput="recSet(${i},'cantidad',+this.value)">
+  cont.innerHTML = (recCart.length?recCart.map((it,i)=>`
+    <div class="item-row" style="grid-template-columns:1fr 68px 100px 34px">
+      <input list="turbolist" value="${(it.nombre||'').replace(/"/g,'&quot;')}" placeholder="Código o nombre del repuesto" oninput="recSetNombre(${i},this.value)">
+      <input type="number" min="0" step="any" value="${it.cantidad}" placeholder="Cant" title="Cantidad" oninput="recSet(${i},'cantidad',+this.value)">
+      <input type="number" min="0" step="any" value="${it.costo!=null?it.costo:''}" placeholder="Costo c/u" title="Precio de costo del repuesto" oninput="recSet(${i},'costo',+this.value)">
       <button class="rm" onclick="delRecRow(${i})">✕</button>
-    </div>`).join('') + `<datalist id="turbolist">${turboProdOptions()}</datalist>` +
+    </div>`).join(''):'') + `<datalist id="turbolist">${turboProdOptionsCode()}</datalist>` +
     (recCart.length?'':'<p class="muted" style="margin:0">Sin repuestos cargados (opcional).</p>');
+  recTotals();
 }
-function recSet(i,k,v){ recCart[i][k]=v; }
-function addRecRow(){ recCart.push({nombre:'',cantidad:1}); renderRecRows(); }
+function recSet(i,k,v){ recCart[i][k]=v; recTotals(); }
+function recSetNombre(i,v){ recCart[i].nombre=v; const p=resolveTurbo(v);
+  if(p){ recCart[i].sku=p.sku||''; recCart[i].costo=+p.costo||0; const row=$$('#recRows .item-row')[i]; if(row) row.children[2].value=recCart[i].costo; }
+  recTotals(); }
+function addRecRow(){ recCart.push({nombre:'',cantidad:1,costo:0,sku:''}); renderRecRows(); }
 function delRecRow(i){ recCart.splice(i,1); renderRecRows(); }
+function recTotals(){
+  const el=$('#recResumen'); if(!el) return;
+  const costoRep=recCart.reduce((s,it)=>s+(+it.cantidad||0)*(+it.costo||0),0);
+  const presup=+($('#r-costo')?$('#r-costo').value:0)||0;
+  const neto=presup-costoRep;
+  el.innerHTML=`
+    <div class="tot-line"><span class="muted">Costo de repuestos usados</span><span class="mono">${money(costoRep)}</span></div>
+    <div class="tot-line"><span class="muted">Ganancia bruta (precio al cliente)</span><span class="mono">${money(presup)}</span></div>
+    <div class="tot-line big"><span>Ganancia neta (bruta − repuestos)</span><span class="mono" style="color:${neto>=0?'var(--green)':'var(--red)'}">${money(neto)}</span></div>`;
+}
 
 function saveRecepcion(){
   const cliente=$('#r-cliente').value.trim();
   if(!cliente){ toast('Ingresá el nombre del cliente.'); return; }
-  const nuevos=recCart.filter(it=>(it.nombre||'').trim()&&+it.cantidad>0).map(it=>({nombre:it.nombre.trim(),cantidad:+it.cantidad}));
+  const nuevos=recCart.filter(it=>(it.nombre||'').trim()&&+it.cantidad>0).map(it=>{ const p=resolveTurbo(it.nombre);
+    return {nombre:p?p.nombre:it.nombre.trim(), sku:p?(p.sku||''):(it.sku||''), cantidad:+it.cantidad, costo:+it.costo||0}; });
   const presup=$('#r-presup').value==='si';
   const data={
     ingreso:$('#r-ingreso').value||todayISO(), cliente, telefono:$('#r-telefono').value.trim(),
@@ -2078,7 +2115,32 @@ function saveGasto(){
   if(id) Object.assign(DB.gastos.find(x=>x.id===id),data); else DB.gastos.push({id:uid(),...data});
   save(); closeModal(); render(); toast('✅ Gasto registrado');
 }
-function delGasto(id){ if(!confirm('¿Eliminar este gasto?'))return; DB.gastos=DB.gastos.filter(x=>x.id!==id); save(); render(); toast('Gasto eliminado'); }
+function delGasto(id){ if(!confirm('¿Eliminar este movimiento?'))return; DB.gastos=DB.gastos.filter(x=>x.id!==id); save(); render(); toast('Eliminado'); }
+
+/* ================= Modal: RETIRO DE EFECTIVO ================= */
+function openRetiro(){
+  $('#modalRoot').innerHTML=`
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head"><div><h2>🏧 Registrar retiro de efectivo</h2><p>Plata que sacás del local (no es un gasto)</p></div>
+      <button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="grid2">
+        <div class="field"><label>Fecha</label><input type="date" id="ret-fecha" value="${todayISO()}"></div>
+        <div class="field"><label>Monto retirado ($)</label><input type="number" min="0" id="ret-monto" placeholder="0"></div>
+      </div>
+      <div class="field"><label>Detalle / motivo (opcional)</label><input id="ret-detalle" placeholder="Ej: retiro para depósito / gastos personales"></div>
+      <p class="qty-hint">Descuenta de la caja para saber con cuánta plata queda el negocio. No cuenta como gasto ni afecta la ganancia.</p>
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="saveRetiro()">Registrar retiro</button></div>
+  </div>`;
+  showModal();
+}
+function saveRetiro(){
+  const monto=+$('#ret-monto').value||0; if(monto<=0){ toast('Ingresá el monto retirado.'); return; }
+  DB.gastos.push({id:uid(),fecha:$('#ret-fecha').value||todayISO(),tipo:RETIRO_TIPO,detalle:$('#ret-detalle').value.trim()||'Retiro de efectivo',monto,metodo:'Efectivo'});
+  save(); closeModal(); render(); toast('🏧 Retiro registrado — '+money(monto));
+}
 
 /* ================= Modal helpers ================= */
 function showModal(){ $('#modalBack').classList.add('show'); }
