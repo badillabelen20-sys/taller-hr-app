@@ -217,7 +217,7 @@ input.chk{width:16px;height:16px;accent-color:var(--brand);cursor:pointer}
 
 /* ===== Logo ===== */
 .brand{flex-direction:column;align-items:stretch;gap:0;padding:6px 6px 12px}
-.brand-logo{width:100%;max-width:210px;height:auto;display:block;margin:2px auto}
+.brand-logo{width:100%;max-width:148px;height:auto;display:block;margin:2px auto 6px;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.18)}
 
 /* ===== Punto de Venta Rápido ===== */
 .pos-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 0}
@@ -277,7 +277,7 @@ input.chk{width:16px;height:16px;accent-color:var(--brand);cursor:pointer}
   background:linear-gradient(135deg,#eceef3,#f6f6f4);padding:20px}
 .login-card{background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.12);
   width:100%;max-width:380px;padding:30px 30px 24px;text-align:center}
-.login-logo{max-width:200px;width:100%;height:auto;margin:0 auto 10px;display:block}
+.login-logo{max-width:190px;width:100%;height:auto;margin:0 auto 14px;display:block;border-radius:18px;box-shadow:0 10px 28px rgba(0,0,0,.20)}
 .login-fb{font-weight:800;color:var(--brand-ink);letter-spacing:.02em;margin-bottom:8px}
 .login-card h2{margin:6px 0 2px;font-size:20px}
 .login-card p{margin:0 0 18px;color:var(--muted);font-size:13px}
