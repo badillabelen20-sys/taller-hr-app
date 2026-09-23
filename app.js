@@ -1315,6 +1315,11 @@ function viewConfig(){
       </div>
       <button class="btn danger" style="margin-top:18px;width:100%" onclick="logout()">⎋ Cerrar sesión</button>
       <p class="qty-hint" style="margin-top:14px">🔒 Login seguro con Supabase. La sesión queda guardada en este equipo hasta que cierres sesión.</p>
+      <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
+        <div class="csub" style="margin-bottom:8px">Herramientas de stock</div>
+        <button class="btn" style="width:100%" onclick="openAuditServices()">🔧 Corregir stock de services</button>
+        <p class="qty-hint" style="margin-top:8px">Descuenta del stock los insumos de services viejos que no se habían descontado. Revisá la vista previa antes de aplicar.</p>
+      </div>
     </div>
     <div class="panel">
       <div class="panel-tools"><strong>Usuarios del taller</strong>
@@ -2034,14 +2039,74 @@ function saveService(){
   if(!cliente){ toast('Ingresá el nombre del cliente.'); return; }
   if(monto<=0){ toast('Ingresá el monto cobrado.'); return; }
   const insumos=svcCart.filter(it=>(it.nombre||'').trim()&&parseFloat((it.cantidad||'').toString().replace(',','.'))>0)
-    .map(it=>{ const p=resolveLubri(it.nombre); return {nombre:p?p.nombre:it.nombre.trim(), sku:p?(p.sku||''):'', cantidad:+parseFloat(it.cantidad.toString().replace(',','.'))}; });
+    .map(it=>{ const p=resolveLubri(it.nombre); return {id:p?p.id:'', nombre:p?p.nombre:it.nombre.trim(), sku:p?(p.sku||''):'', cantidad:+parseFloat(it.cantidad.toString().replace(',','.'))}; });
+  // Aviso si algún insumo no está en el stock (no se va a poder descontar)
+  const sinStock=insumos.filter(it=>!it.id);
+  if(sinStock.length && !confirm('⚠️ Estos insumos NO están en tu Control de Stock, así que NO se van a descontar:\n\n• '+sinStock.map(x=>x.nombre).join('\n• ')+'\n\nRevisá que estén bien escritos o cargalos en Stock.\n\n¿Registrar el service igual?')) return;
   const venta={id:uid(),fecha:$('#s-fecha').value||todayISO(),rubro:'lubricentro',tipo:'service',
     cliente,vehiculo,patente,telefono:$('#s-telefono').value.trim(),kilometros:+$('#s-km').value||0,
-    metodo:$('#s-metodo').value, items:[{nombre:'Service / cambio de aceite'+(patente?' — '+patente:''),cantidad:1,precio:monto}],
+    metodo:$('#s-metodo').value, items:[{nombre:'Service / cambio de aceite'+(patente?' — '+patente:''),cantidad:1,precio:monto,descontado:true}],
     insumos, total:monto};
   DB.ventas.push(venta);
-  insumos.forEach(it=>{ const p=DB.productos.find(x=>x.rubro==='lubricentro'&&x.nombre===it.nombre); if(p) p.stock=+(p.stock-it.cantidad).toFixed(3); });
-  save(); closeModal(); render(); toast('✅ Service registrado — '+money(monto));
+  insumos.forEach(it=>{ const p=it.id?DB.productos.find(x=>x.id===it.id):DB.productos.find(x=>x.rubro==='lubricentro'&&x.nombre===it.nombre); if(p) p.stock=+(p.stock-it.cantidad).toFixed(3); });
+  save(); closeModal(); render(); toast('✅ Service registrado — '+money(monto)+(sinStock.length?' (⚠️ '+sinStock.length+' insumo/s sin descontar)':''));
+}
+
+/* ===== Auditoría: descontar insumos de services que no se descontaron ===== */
+function svcDescontado(v){ return !!(v.items&&v.items[0]&&v.items[0].descontado); }
+function matchInsumoProd(it){
+  return (it.id?DB.productos.find(x=>x.id===it.id):null)
+    || (it.sku?DB.productos.find(x=>x.rubro==='lubricentro'&&x.sku&&x.sku.toLowerCase()===String(it.sku).toLowerCase()):null)
+    || DB.productos.find(x=>x.rubro==='lubricentro'&&x.nombre===it.nombre)
+    || DB.productos.find(x=>x.rubro==='lubricentro'&&x.nombre.toLowerCase()===String(it.nombre||'').toLowerCase())
+    || null;
+}
+function auditServices(){
+  const pend=DB.ventas.filter(v=>v.tipo==='service'&&!svcDescontado(v));
+  const porProd={}, noMatch={};
+  pend.forEach(v=>(v.insumos||[]).forEach(it=>{
+    const c=+it.cantidad||0; if(c<=0) return;
+    const p=matchInsumoProd(it);
+    if(p){ (porProd[p.id]=porProd[p.id]||{p,usado:0}).usado+=c; }
+    else { const k=(it.nombre||'?').trim()||'?'; (noMatch[k]=noMatch[k]||{nombre:k,usado:0}).usado+=c; }
+  }));
+  return {pend, porProd:Object.values(porProd).sort((a,b)=>b.usado-a.usado), noMatch:Object.values(noMatch).sort((a,b)=>b.usado-a.usado)};
+}
+function openAuditServices(){
+  const a=auditServices();
+  $('#modalRoot').innerHTML=`
+  <div class="modal" style="max-width:660px">
+    <div class="modal-head"><div><h2>🔧 Corregir stock de services</h2><p>Descontar insumos de services que no se descontaron</p></div>
+      <button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <p class="qty-hint">Hay <b>${a.pend.length}</b> service(s) sin marcar como descontados. Abajo ves cuánto se restaría de cada producto. <b>Revisá que la columna "Quedaría" tenga sentido</b> (si te da negativo o muy bajo, es que ese producto ya se había descontado — no apliques).</p>
+      ${a.porProd.length?`
+      <div style="overflow:auto;max-height:320px;border:1px solid var(--line);border-radius:10px">
+      <table><thead><tr><th>Producto</th><th class="right">Usado</th><th class="right">Stock hoy</th><th class="right">Quedaría</th></tr></thead>
+      <tbody>${a.porProd.map(c=>{const nuevo=+(c.p.stock-c.usado).toFixed(3);return `
+        <tr><td>${c.p.nombre}${c.p.sku&&c.p.sku!==c.p.nombre?` <span class="muted mono">${c.p.sku}</span>`:''}</td>
+        <td class="right mono">${num(c.usado)}</td><td class="right mono">${num(c.p.stock)}</td>
+        <td class="right strong mono" style="color:${nuevo<0?'var(--red)':'var(--green)'}">${num(nuevo)}</td></tr>`;}).join('')}</tbody></table></div>`
+      :'<p class="muted">No hay insumos identificables para descontar.</p>'}
+      ${a.noMatch.length?`<div style="margin-top:14px"><strong style="color:var(--red)">⚠️ Insumos que NO coinciden con ningún producto (${a.noMatch.length})</strong>
+        <p class="qty-hint">Estos se escribieron a mano y no se pueden descontar solos. Buscá el producto en Stock y ajustalo vos:</p>
+        <ul style="margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13px;max-height:150px;overflow:auto">${a.noMatch.slice(0,60).map(n=>`<li>${n.nombre} — usado ${num(n.usado)}</li>`).join('')}</ul></div>`:''}
+      <p class="qty-hint" style="margin-top:14px">⚠️ Aplicalo <b>una sola vez</b>. Los services quedan marcados como descontados y no se vuelven a contar.</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      ${a.porProd.length?`<button class="btn primary" onclick="applyAuditServices()">Aplicar descuento a ${a.porProd.length} producto(s)</button>`:''}
+    </div>
+  </div>`;
+  showModal();
+}
+function applyAuditServices(){
+  const a=auditServices();
+  if(!a.porProd.length){ closeModal(); return; }
+  if(!confirm('Se va a descontar el stock de '+a.porProd.length+' producto(s) según los insumos de '+a.pend.length+' service(s).\n\n¿Estás segura? (revisá antes la columna "Quedaría")')) return;
+  a.porProd.forEach(c=>{ c.p.stock=+(c.p.stock-c.usado).toFixed(3); });
+  a.pend.forEach(v=>{ if(v.items&&v.items[0]) v.items[0].descontado=true; });
+  save(); closeModal(); render(); toast('✅ Stock corregido en '+a.porProd.length+' producto(s)');
 }
 
 /* ================= OTROS TRABAJOS (frenos, distribución, etc.) ================= */
