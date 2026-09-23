@@ -291,7 +291,20 @@ function nombreProveedor(id){ const p=DB.proveedores.find(x=>x.id===id); return 
 function toggleSidebar(){ $('.sidebar').classList.toggle('open'); $('#sbBackdrop').classList.toggle('show'); }
 function closeSidebar(){ const s=$('.sidebar'); if(s&&s.classList.contains('open')){ s.classList.remove('open'); $('#sbBackdrop').classList.remove('show'); } }
 
+/* ===== Permisos por rol ===== */
+const ROLE_VIEWS = { 'Vendedor': ['ventas','stock'] };  // el vendedor solo ve Ventas y Control de Stock
+function allowedViews(){ return CURRENT_USER ? (ROLE_VIEWS[CURRENT_USER.rol]||null) : null; }
+function canSee(view){ const a=allowedViews(); return !a || a.includes(view); }
+function esVendedor(){ return !!(CURRENT_USER && CURRENT_USER.rol==='Vendedor'); }
+function firstAllowed(){ const a=allowedViews(); return (a&&a[0])||'inicio'; }
+function applyPermsNav(){
+  const a=allowedViews();
+  $$('.nav-item[data-view]').forEach(b=>{ b.style.display = (!a || a.includes(b.dataset.view)) ? '' : 'none'; });
+  $$('.nav-section').forEach(sec=>{ const items=[...sec.querySelectorAll('.nav-item')]; sec.style.display = items.some(i=>i.style.display!=='none') ? '' : 'none'; });
+}
+
 function go(view, opts={}){
+  if(!canSee(view)){ view=firstAllowed(); opts={}; }
   current = view;
   if(opts.rubro){ if(view==='stock') stockFilter=opts.rubro; if(view==='ventas') saleFilter=opts.rubro; if(view==='diario') diaryFilter=opts.rubro==='todos'?'turbo':opts.rubro; }
   const want = opts.rubro || null;
@@ -304,9 +317,11 @@ function animateView(){ const c=$('#content'); if(!c)return; c.classList.remove(
 
 function render(){
   const el = $('#content');
+  if(!canSee(current)) current = firstAllowed();
   const map = {inicio:viewInicio, ventas:viewVentas, stock:viewStock, recepcion:viewRecepcion, diario:viewDiario, resumen:viewResumen, clientes:viewClientes, proveedores:viewProveedores, gastos:viewGastos, caja:viewCaja, config:viewConfig};
   el.innerHTML = (map[current]||viewInicio)();
   wireView();
+  applyPermsNav();
   // actualizar badge de stock bajo
   const bajos = DB.productos.filter(p=>p.stock<=p.stockMin).length;
   const badge = $('#stockBadge'); if(badge){ badge.textContent = bajos; badge.classList.toggle('hide', bajos===0); }
@@ -473,16 +488,18 @@ function alertasStock(){
 
 /* ---- VENTAS ---- */
 function viewVentas(){
+  const vend=esVendedor();
   const list = ventasFiltro(saleFilter).filter(v=>!esRepuestoTurbo(v));
   return `
   <div class="page-head">
-    <div><h1>Ventas</h1><p>Registrá y consultá las ventas de turbos y lubricentro</p></div>
+    <div><h1>Ventas</h1><p>${vend?'Punto de venta':'Registrá y consultá las ventas de turbos y lubricentro'}</p></div>
     <div class="actions">
-      <button class="btn" onclick="exportCSV('ventas')">⭳ Exportar</button>
+      ${vend?'':`<button class="btn" onclick="exportCSV('ventas')">⭳ Exportar</button>`}
       <button class="btn service" onclick="openService()">🛢️ NUEVO SERVICE</button>
     </div>
   </div>
   ${cartPanel()}
+  ${vend?'':`
   <div class="panel" style="margin-top:16px">
     <div class="panel-tools">
       <div class="mini-search">${iconSearch()}<input id="qVenta" placeholder="Buscar por cliente, vehículo o ítem"></div>
@@ -495,7 +512,7 @@ function viewVentas(){
       <tbody id="ventasBody">${rowsVentas(list)}</tbody>
     </table>
     <div class="table-foot"><span>${list.length} venta(s)</span></div>
-  </div>`;
+  </div>`}`;
 }
 function rowsVentas(list){
   if(!list.length) return `<tr><td colspan="7"><div class="empty"><div class="big">🧾</div>No hay ventas registradas.<br><button class="btn primary sm" style="margin-top:12px" onclick="openSale()">＋ Registrar venta</button></div></td></tr>`;
@@ -575,15 +592,21 @@ function viewStock(){
   const valorStock = DB.productos.reduce((s,p)=>s+p.costo*p.stock,0);
   const nBajos=DB.productos.filter(p=>p.stock<=p.stockMin).length;
   const nSin=DB.productos.filter(p=>p.stock<=0).length;
+  const vend=esVendedor();
   return `
   <div class="page-head">
-    <div><h1>Control de Stock</h1><p>Gestioná inventario, precios y disponibilidad de repuestos e insumos</p></div>
+    <div><h1>Control de Stock</h1><p>${vend?'Consultá precios y disponibilidad':'Gestioná inventario, precios y disponibilidad de repuestos e insumos'}</p></div>
     <div class="actions">
-      <button class="btn" onclick="exportCSV('stock')">⭳ Exportar</button>
-      <button class="btn primary" onclick="openProduct()">＋ Agregar producto</button>
+      ${vend?'':`<button class="btn" onclick="exportCSV('stock')">⭳ Exportar</button>
+      <button class="btn primary" onclick="openProduct()">＋ Agregar producto</button>`}
     </div>
   </div>
-  ${statsRow([
+  ${statsRow(vend?[
+    {ic:'📦', lbl:'Productos', val:num(DB.productos.length), delta:'', up:true, per:'Total'},
+    {ic:'⚠️', lbl:'Stock bajo', val:num(nBajos), delta:nBajos?'Revisar':'OK', up:nBajos===0, per:'Por reponer'},
+    {ic:'⛔', lbl:'Sin stock', val:num(nSin), delta:nSin?'Urgente':'OK', up:nSin===0, per:'Agotados'},
+    {ic:'🌀', lbl:'Turbos / Lubri', val:num(DB.productos.filter(p=>p.rubro==='turbo').length)+' / '+num(DB.productos.filter(p=>p.rubro==='lubricentro').length), delta:'', up:true, per:'Productos'},
+  ]:[
     {ic:'📦', lbl:'Productos', val:num(DB.productos.length), delta:'+2', up:true, per:'Total'},
     {ic:'💰', lbl:'Valor de inventario', val:money(valorStock), delta:'+5,0%', up:true, per:'A costo'},
     {ic:'⚠️', lbl:'Stock bajo', val:num(nBajos), delta:nBajos?'Revisar':'OK', up:nBajos===0, per:'Por reponer'},
@@ -596,7 +619,7 @@ function viewStock(){
     </div>
     <table>
       <thead><tr>
-        <th>Producto</th><th>Código</th><th>Rubro</th><th class="right">Costo</th><th class="right">Venta</th><th class="right">Stock</th><th>Estado</th><th></th>
+        <th>Producto</th><th>Código</th><th>Rubro</th>${vend?'':'<th class="right">Costo</th>'}<th class="right">Venta</th><th class="right">Stock</th><th>Estado</th>${vend?'':'<th></th>'}
       </tr></thead>
       <tbody id="stockBody">${rowsStock(list)}</tbody>
     </table>
@@ -604,11 +627,12 @@ function viewStock(){
   </div>`;
 }
 function rowsStock(list){
-  if(!list.length) return `<tr><td colspan="8"><div class="empty"><div class="big">📦</div>No hay productos.<br><button class="btn primary sm" style="margin-top:12px" onclick="openProduct()">＋ Agregar producto</button></div></td></tr>`;
+  const vend=esVendedor(); const cols=vend?6:8;
+  if(!list.length) return `<tr><td colspan="${cols}"><div class="empty"><div class="big">📦</div>No hay productos.${vend?'':'<br><button class="btn primary sm" style="margin-top:12px" onclick="openProduct()">＋ Agregar producto</button>'}</div></td></tr>`;
   let html='', lastCat=null;
   list.forEach(p=>{
     const cat=(p.tipo||'').trim()||'Sin categoría';
-    if(cat!==lastCat){ html+=`<tr class="cat-row"><td colspan="8">${cat}</td></tr>`; lastCat=cat; }
+    if(cat!==lastCat){ html+=`<tr class="cat-row"><td colspan="${cols}">${cat}</td></tr>`; lastCat=cat; }
     const e=estadoStock(p);
     html+=`
     <tr>
@@ -616,14 +640,14 @@ function rowsStock(list){
         <div><div class="t">${p.nombre}</div><div class="sub">${p.tipo||''}</div></div></td>
       <td class="muted mono">${p.sku||'—'}</td>
       <td><span class="tag ${p.rubro==='turbo'?'turbo':'lubri'}">${p.rubro==='turbo'?'Turbos':'Lubricentro'}</span></td>
-      <td class="right muted mono">${money(p.costo)}</td>
+      ${vend?'':`<td class="right muted mono">${money(p.costo)}</td>`}
       <td class="right strong mono">${money(p.precio)}</td>
       <td class="right mono">${num(p.stock)} <span class="muted">/ mín ${p.stockMin}</span></td>
       <td><span class="pill ${e.cls}">${e.txt}</span></td>
-      <td class="right">
+      ${vend?'':`<td class="right">
         <button class="rowbtn" onclick="openProduct('${p.id}')">Editar</button>
         <button class="rowbtn del" onclick="delProducto('${p.id}')">✕</button>
-      </td>
+      </td>`}
     </tr>`;
   });
   return html;
@@ -1317,7 +1341,8 @@ function openUsuario(id){
       <div class="field"><label>Email (con esto inicia sesión)</label><input id="u-email" type="email" placeholder="juan@taller.com" autocomplete="off"></div>
       <div class="field"><label>Contraseña</label><input id="u-pass" placeholder="mínimo 6 caracteres" autocomplete="new-password"></div>`}
       <div class="field"><label>Rol</label>
-        <select id="u-rol">${['Dueño','Encargado','Mecánico','Administrativo','Integrante'].map(r=>`<option ${e.rol===r?'selected':''}>${r}</option>`).join('')}</select></div>
+        <select id="u-rol">${['Dueño','Encargado','Vendedor','Mecánico','Administrativo','Integrante'].map(r=>`<option ${e.rol===r?'selected':''}>${r}</option>`).join('')}</select>
+          <div class="qty-hint" style="margin-top:4px">El rol <b>Vendedor</b> solo ve Ventas y Control de Stock (sin montos ni caja).</div></div>
     </div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button>
       <button class="btn primary" onclick="saveUsuario()">${x?'Guardar':'Crear usuario'}</button></div>
@@ -2210,7 +2235,8 @@ async function entrar(session){
 }
 function showLogin(){ $('#loginScreen').classList.remove('hide'); $('.app').classList.add('hide'); const e=$('#li-user'); if(e){ e.value=''; e.focus(); } }
 function showLoading(){ const er=$('#li-error'); if(er){ er.textContent='Cargando datos…'; er.classList.remove('hide'); } }
-function showApp(){ $('#loginScreen').classList.add('hide'); $('.app').classList.remove('hide'); render(); animateView(); }
+function showApp(){ $('#loginScreen').classList.add('hide'); $('.app').classList.remove('hide'); render(); animateView();
+  $$('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.view===current && !b.dataset.rubro)); }
 
 async function doLogin(){
   const email=$('#li-user').value.trim(), pass=$('#li-pass').value;
