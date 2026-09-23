@@ -203,6 +203,9 @@ function estadoStock(p){
 }
 // Un "repuesto usado en turbo" NO es una venta (no cuenta como recaudado)
 function esRepuestoTurbo(v){ return v.rubro==='turbo' && v.tipo!=='service' && v.origen!=='recepcion' && (v.tipo==='repuesto' || (+v.total||0)===0); }
+function esOtroTrabajo(v){ return v.rubro==='otros'; }
+function costoTrabajo(v){ return (v.items||[]).reduce((s,it)=>s+((+it.costo||0)*(+it.cantidad||0)),0); }
+function gananciaTrabajo(v){ return (+v.total||0)-costoTrabajo(v); }
 function ventasFiltro(rubro){
   let v = [...DB.ventas];
   if(rubro && rubro!=='todos') v = v.filter(x=>x.rubro===rubro);
@@ -278,6 +281,7 @@ let clientFilter = 'turbo';
 const ymNow = () => new Date().toISOString().slice(0,7);
 let gastoMonth = ymNow();
 let cajaMonth  = ymNow();
+let trabMonth  = ymNow();
 const GASTO_TIPOS = ['Proveedor / Mercadería','Alquiler','Servicios (luz/agua/internet)','Sueldos','Impuestos','Mantenimiento','Gastos chicos','Otros'];
 function monthKey(iso){ return (iso||'').slice(0,7); }
 function fmtMonth(ym){ const [y,m]=ym.split('-'); return MES[+m-1]+' '+y; }
@@ -318,7 +322,7 @@ function animateView(){ const c=$('#content'); if(!c)return; c.classList.remove(
 function render(){
   const el = $('#content');
   if(!canSee(current)) current = firstAllowed();
-  const map = {inicio:viewInicio, ventas:viewVentas, stock:viewStock, recepcion:viewRecepcion, diario:viewDiario, resumen:viewResumen, clientes:viewClientes, proveedores:viewProveedores, gastos:viewGastos, caja:viewCaja, config:viewConfig};
+  const map = {inicio:viewInicio, ventas:viewVentas, stock:viewStock, recepcion:viewRecepcion, diario:viewDiario, resumen:viewResumen, clientes:viewClientes, trabajos:viewTrabajos, proveedores:viewProveedores, gastos:viewGastos, caja:viewCaja, config:viewConfig};
   el.innerHTML = (map[current]||viewInicio)();
   wireView();
   applyPermsNav();
@@ -489,13 +493,14 @@ function alertasStock(){
 /* ---- VENTAS ---- */
 function viewVentas(){
   const vend=esVendedor();
-  const list = ventasFiltro(saleFilter).filter(v=>!esRepuestoTurbo(v));
+  const list = ventasFiltro(saleFilter).filter(v=>!esRepuestoTurbo(v) && !esOtroTrabajo(v));
   return `
   <div class="page-head">
     <div><h1>Ventas</h1><p>${vend?'Punto de venta':'Registrá y consultá las ventas de turbos y lubricentro'}</p></div>
     <div class="actions">
-      ${vend?'':`<button class="btn" onclick="exportCSV('ventas')">⭳ Exportar</button>`}
+      ${vend?'':`<button class="btn" onclick="exportCSV('ventas')">⭳ Exportar</button>
       <button class="btn service" onclick="openService()">🛢️ NUEVO SERVICE</button>
+      <button class="btn trabajo" onclick="openTrabajo()">🔧 OTRO TRABAJO</button>`}
     </div>
   </div>
   ${cartPanel()}
@@ -2037,6 +2042,186 @@ function saveService(){
   DB.ventas.push(venta);
   insumos.forEach(it=>{ const p=DB.productos.find(x=>x.rubro==='lubricentro'&&x.nombre===it.nombre); if(p) p.stock=+(p.stock-it.cantidad).toFixed(3); });
   save(); closeModal(); render(); toast('✅ Service registrado — '+money(monto));
+}
+
+/* ================= OTROS TRABAJOS (frenos, distribución, etc.) ================= */
+let trabStock=[]; let trabCompr=[];
+const TRAB_TIPOS=['Frenos','Distribución','Embrague','Suspensión','Tren delantero','Escape','Electricidad','Motor','Refrigeración','Otro'];
+function openTrabajo(id){
+  const v=id?DB.ventas.find(x=>x.id===id):null;
+  trabStock=[]; trabCompr=[];
+  if(v){ (v.items||[]).forEach(it=>{
+    if(it.origen==='stock') trabStock.push({id:it.id||'',nombre:(it.sku&&it.sku!==it.nombre?it.sku+' — ':'')+it.nombre,sku:it.sku||'',cantidad:+it.cantidad||1,costo:+it.costo||0});
+    else if(it.origen==='comprado') trabCompr.push({nombre:it.nombre,cantidad:+it.cantidad||1,costo:+it.costo||0});
+  }); }
+  $('#modalRoot').innerHTML=trabajoModalHTML(v);
+  showModal(); renderTrabRows(); trabTotals();
+  const t=$('#tr-tipo'); if(t) t.focus();
+}
+function trabajoModalHTML(v){
+  const itk=k=> (v&&(v.items||[]).find(x=>x.origen===k))||null;
+  const mano=itk('mano')?(+itk('mano').precio||0):'';
+  const ins=itk('insumos')?(+itk('insumos').precio||0):'';
+  return `
+  <div class="modal">
+    <div class="modal-head"><div><h2>🔧 ${v?'Editar trabajo':'Nuevo trabajo'}</h2><p>Frenos, distribución, embrague y otros trabajos</p></div>
+      <button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="tr-id" value="${v?v.id:''}">
+      <div class="grid3">
+        <div class="field"><label>Fecha</label><input type="date" id="tr-fecha" value="${v?v.fecha:todayISO()}"></div>
+        <div class="field"><label>Tipo de trabajo *</label><input id="tr-tipo" list="trabtipos" value="${v?(v.tipo||'').replace(/"/g,'&quot;'):''}" placeholder="Ej: Frenos" autocomplete="off">
+          <datalist id="trabtipos">${TRAB_TIPOS.map(t=>`<option value="${t}">`).join('')}</datalist></div>
+        <div class="field"><label>Medio de pago</label>
+          <select id="tr-metodo">${['Efectivo','Transferencia','Débito','Crédito','Cuenta corriente'].map(x=>`<option ${v&&v.metodo===x?'selected':''}>${x}</option>`).join('')}</select></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>Cliente</label><input id="tr-cliente" value="${v?(v.cliente==='Consumidor final'?'':(v.cliente||'')).replace(/"/g,'&quot;'):''}" placeholder="Nombre (opcional)"></div>
+        <div class="field"><label>Vehículo</label><input id="tr-vehiculo" value="${v?(v.vehiculo||'').replace(/"/g,'&quot;'):''}" placeholder="Ej: Ford Focus 2015"></div>
+        <div class="field"><label>Patente</label><input id="tr-patente" value="${v?(v.patente||''):''}" placeholder="AB123CD" style="text-transform:uppercase"></div>
+      </div>
+
+      <div class="items-head"><h4>Repuestos del stock (se descuentan del stock)</h4>
+        <button class="btn sm" onclick="addTrabStock()">＋ Agregar del stock</button></div>
+      <div id="trStockRows"></div>
+
+      <div class="items-head" style="margin-top:14px"><h4>Repuestos comprados en el momento</h4>
+        <button class="btn sm" onclick="addTrabCompr()">＋ Agregar comprado</button></div>
+      <div id="trComprRows"></div>
+      <p class="qty-hint" style="margin:4px 0 0">Los comprados en el momento no están en tu stock: poné nombre, cantidad y lo que te costaron.</p>
+
+      <div class="grid3" style="margin-top:14px">
+        <div class="field"><label>Mano de obra ($)</label><input type="number" min="0" step="any" id="tr-mano" value="${mano}" placeholder="0" oninput="trabTotals()"></div>
+        <div class="field"><label>Insumos cobrados ($)</label><input type="number" min="0" step="any" id="tr-insumos" value="${ins}" placeholder="0" oninput="trabTotals()"></div>
+        <div class="field"><label>Total cobrado ($) *</label><input type="number" min="0" step="any" id="tr-total" value="${v?(+v.total||''):''}" placeholder="0" oninput="trabTotals()"></div>
+      </div>
+      <div id="trResumen" style="border-top:1px dashed var(--line);padding-top:10px;margin-top:12px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="saveTrabajo()">${v?'Guardar cambios':'Registrar trabajo'}</button>
+    </div>
+  </div>`;
+}
+function renderTrabRows(){
+  const s=$('#trStockRows');
+  if(s){ s.innerHTML = (trabStock.length?trabStock.map((it,i)=>`
+    <div class="item-row" style="grid-template-columns:1fr 60px 100px 34px">
+      <input list="trabprodlist" value="${(it.nombre||'').replace(/"/g,'&quot;')}" placeholder="Código o nombre del repuesto" oninput="trabStockName(${i},this.value)">
+      <input type="number" min="0" step="any" value="${it.cantidad}" placeholder="Cant" oninput="trabStockSet(${i},'cantidad',+this.value)">
+      <input type="number" min="0" step="any" value="${it.costo!=null?it.costo:''}" placeholder="Costo c/u" title="Costo unitario" oninput="trabStockSet(${i},'costo',+this.value)">
+      <button class="rm" onclick="delTrabStock(${i})">✕</button>
+    </div>`).join(''):'<p class="muted" style="margin:0 0 6px">Sin repuestos del stock.</p>') + `<datalist id="trabprodlist">${allProdOptions()}</datalist>`; }
+  const c=$('#trComprRows');
+  if(c){ c.innerHTML = (trabCompr.length?trabCompr.map((it,i)=>`
+    <div class="item-row" style="grid-template-columns:1fr 60px 100px 34px">
+      <input value="${(it.nombre||'').replace(/"/g,'&quot;')}" placeholder="Nombre del repuesto" oninput="trabComprSet(${i},'nombre',this.value)">
+      <input type="number" min="0" step="any" value="${it.cantidad}" placeholder="Cant" oninput="trabComprSet(${i},'cantidad',+this.value)">
+      <input type="number" min="0" step="any" value="${it.costo!=null?it.costo:''}" placeholder="Costo c/u" oninput="trabComprSet(${i},'costo',+this.value)">
+      <button class="rm" onclick="delTrabCompr(${i})">✕</button>
+    </div>`).join(''):'<p class="muted" style="margin:0 0 6px">Sin repuestos comprados.</p>'); }
+  trabTotals();
+}
+function trabStockName(i,v){ trabStock[i].nombre=v; const p=resolveProd(v);
+  if(p){ trabStock[i].id=p.id; trabStock[i].sku=p.sku||''; trabStock[i].costo=+p.costo||0; const row=$$('#trStockRows .item-row')[i]; if(row) row.children[2].value=trabStock[i].costo; }
+  trabTotals(); }
+function trabStockSet(i,k,v){ trabStock[i][k]=v; trabTotals(); }
+function addTrabStock(){ trabStock.push({id:'',nombre:'',sku:'',cantidad:1,costo:0}); renderTrabRows(); }
+function delTrabStock(i){ trabStock.splice(i,1); renderTrabRows(); }
+function trabComprSet(i,k,v){ trabCompr[i][k]=v; trabTotals(); }
+function addTrabCompr(){ trabCompr.push({nombre:'',cantidad:1,costo:0}); renderTrabRows(); }
+function delTrabCompr(i){ trabCompr.splice(i,1); renderTrabRows(); }
+function trabTotals(){
+  const el=$('#trResumen'); if(!el) return;
+  const costo = trabStock.reduce((s,it)=>s+(+it.cantidad||0)*(+it.costo||0),0) + trabCompr.reduce((s,it)=>s+(+it.cantidad||0)*(+it.costo||0),0);
+  const mano=+($('#tr-mano')?$('#tr-mano').value:0)||0;
+  const ins=+($('#tr-insumos')?$('#tr-insumos').value:0)||0;
+  const total=+($('#tr-total')?$('#tr-total').value:0)||0;
+  const gan=total-costo;
+  el.innerHTML=`
+    <div class="tot-line"><span class="muted">Costo de repuestos (stock + comprados)</span><span class="mono">${money(costo)}</span></div>
+    <div class="tot-line"><span class="muted">Sugerido (mano de obra + insumos)</span><span class="mono">${money(mano+ins)}</span></div>
+    <div class="tot-line"><span class="muted">Total cobrado</span><span class="mono">${money(total)}</span></div>
+    <div class="tot-line big"><span>Ganancia (total − repuestos)</span><span class="mono" style="color:${gan>=0?'var(--green)':'var(--red)'}">${money(gan)}</span></div>`;
+}
+function saveTrabajo(){
+  const tipo=($('#tr-tipo').value||'').trim()||'Otro trabajo';
+  const total=+$('#tr-total').value||0;
+  if(total<=0){ toast('Ingresá el total cobrado.'); return; }
+  const mano=+$('#tr-mano').value||0;
+  const ins=+$('#tr-insumos').value||0;
+  const stockItems=trabStock.filter(it=>(it.nombre||'').trim()&&+it.cantidad>0).map(it=>{ const p=resolveProd(it.nombre)||(it.id?DB.productos.find(x=>x.id===it.id):null);
+    return {id:p?p.id:(it.id||''), nombre:p?p.nombre:it.nombre.trim(), sku:p?(p.sku||''):(it.sku||''), cantidad:+it.cantidad, costo:+it.costo||0, origen:'stock'}; });
+  const comprItems=trabCompr.filter(it=>(it.nombre||'').trim()&&+it.cantidad>0).map(it=>({nombre:it.nombre.trim(),cantidad:+it.cantidad,costo:+it.costo||0,origen:'comprado'}));
+  const items=[...stockItems,...comprItems];
+  if(mano>0) items.push({nombre:'Mano de obra',cantidad:1,precio:mano,costo:0,origen:'mano'});
+  if(ins>0) items.push({nombre:'Insumos (cobrado)',cantidad:1,precio:ins,costo:0,origen:'insumos'});
+  const data={ fecha:$('#tr-fecha').value||todayISO(), rubro:'otros', tipo,
+    cliente:$('#tr-cliente').value.trim()||'Consumidor final', vehiculo:$('#tr-vehiculo').value.trim(), patente:$('#tr-patente').value.trim().toUpperCase(),
+    metodo:$('#tr-metodo').value, total, items, insumos:[] };
+  const id=$('#tr-id').value;
+  if(id){ const v=DB.ventas.find(x=>x.id===id); if(v){
+      (v.items||[]).filter(x=>x.origen==='stock').forEach(x=>{ const p=x.id?DB.productos.find(y=>y.id===x.id):DB.productos.find(y=>y.nombre===x.nombre); if(p) p.stock=+(p.stock+(+x.cantidad||0)).toFixed(3); });
+      Object.assign(v,data);
+    } }
+  else { DB.ventas.push({id:uid(),...data}); }
+  stockItems.forEach(it=>{ const p=it.id?DB.productos.find(x=>x.id===it.id):DB.productos.find(x=>x.nombre===it.nombre); if(p) p.stock=+(p.stock-it.cantidad).toFixed(3); });
+  save(); closeModal(); render(); toast('✅ Trabajo registrado — '+money(total));
+}
+function delTrabajo(id){
+  if(!confirm('¿Eliminar este trabajo? Se repondrán al stock los repuestos usados.'))return;
+  const v=DB.ventas.find(x=>x.id===id);
+  if(v){ (v.items||[]).filter(x=>x.origen==='stock').forEach(x=>{ const p=x.id?DB.productos.find(y=>y.id===x.id):DB.productos.find(y=>y.nombre===x.nombre); if(p) p.stock=+(p.stock+(+x.cantidad||0)).toFixed(3); }); }
+  DB.ventas=DB.ventas.filter(x=>x.id!==id); save(); render(); toast('Trabajo eliminado');
+}
+function viewTrabajos(){
+  const ym=trabMonth;
+  const list=DB.ventas.filter(v=>esOtroTrabajo(v)&&monthKey(v.fecha)===ym).sort((a,b)=>b.fecha.localeCompare(a.fecha)||(b.id||'').localeCompare(a.id||''));
+  const cobrado=list.reduce((s,v)=>s+(+v.total||0),0);
+  const costo=list.reduce((s,v)=>s+costoTrabajo(v),0);
+  const ganancia=cobrado-costo;
+  return `
+  <div class="page-head">
+    <div><h1>Otros trabajos</h1><p>Frenos, distribución, embrague y todo trabajo que no sea turbo ni service</p></div>
+    <div class="actions">
+      <select class="btn" style="font-weight:600" onchange="trabMonth=this.value;render()">${monthOptions(ym)}</select>
+      <button class="btn trabajo" onclick="openTrabajo()">🔧 OTRO TRABAJO</button>
+    </div>
+  </div>
+  ${statsRow([
+    {ic:'🔧', lbl:'Trabajos', val:num(list.length), delta:'', up:true, per:fmtMonth(ym)},
+    {ic:'💵', lbl:'Total cobrado', val:money(cobrado), delta:'', up:true, per:fmtMonth(ym)},
+    {ic:'📦', lbl:'Costo repuestos', val:money(costo), delta:'', up:false, per:fmtMonth(ym)},
+    {ic:'📈', lbl:'Ganancia', val:money(ganancia), delta:'', up:ganancia>=0, per:'Cobrado − repuestos'},
+  ])}
+  <div class="panel">
+    <div class="panel-tools"><strong>Trabajos de ${fmtMonth(ym)}</strong></div>
+    <table>
+      <thead><tr>
+        <th>Trabajo</th><th>Cliente / Vehículo</th><th>Fecha</th><th>Pago</th><th class="right">Cobrado</th><th class="right">Repuestos</th><th class="right">Ganancia</th><th></th>
+      </tr></thead>
+      <tbody>${list.length?list.map(v=>{
+        const rep=(v.items||[]).filter(it=>it.origen==='stock'||it.origen==='comprado');
+        const gan=gananciaTrabajo(v);
+        const repTxt=rep.length?rep.map(it=>`${it.nombre}${(+it.cantidad>1)?' ×'+num(it.cantidad):''}`).join(', '):'—';
+        return `
+        <tr>
+          <td class="cell-name"><div class="thumb">${ico('🔧')}</div>
+            <div><div class="t">${v.tipo||'Otro trabajo'}</div><div class="sub">${repTxt}</div></div></td>
+          <td>${(v.cliente&&v.cliente!=='Consumidor final')?v.cliente:''}${v.vehiculo?`<div class="sub muted">${v.vehiculo}${v.patente?' · '+v.patente:''}</div>`:(v.patente?`<div class="sub muted">${v.patente}</div>`:'')}</td>
+          <td class="muted mono">${fmtDate(v.fecha)}</td>
+          <td><span class="muted">${v.metodo||'—'}</span></td>
+          <td class="right strong mono">${money(v.total)}</td>
+          <td class="right muted mono">${money(costoTrabajo(v))}</td>
+          <td class="right mono" style="color:${gan>=0?'var(--green)':'var(--red)'}">${money(gan)}</td>
+          <td class="right">
+            <button class="rowbtn" onclick="openTrabajo('${v.id}')">Editar</button>
+            <button class="rowbtn del" onclick="delTrabajo('${v.id}')">✕</button>
+          </td>
+        </tr>`;}).join(''):`<tr><td colspan="8"><div class="empty"><div class="big">🔧</div>Sin trabajos en ${fmtMonth(ym)}.<br><button class="btn primary sm" style="margin-top:12px" onclick="openTrabajo()">🔧 Registrar trabajo</button></div></td></tr>`}</tbody>
+    </table>
+    <div class="table-foot"><span>${list.length} trabajo(s) · cobrado ${money(cobrado)} · ganancia ${money(ganancia)}</span></div>
+  </div>`;
 }
 
 /* ================= Modal: PROVEEDOR ================= */
