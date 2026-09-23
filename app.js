@@ -38,20 +38,20 @@ const PAY = [
 
 /* ================= Conexión a Supabase (nube) ================= */
 const supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
-const TABLES = ['productos','proveedores','compras','ventas','recepciones','gastos','movimientos'];
+const TABLES = ['productos','proveedores','compras','ventas','recepciones','gastos','movimientos','turnos'];
 const FIELDMAP = {
   productos:{stockMin:'stock_min'},
   ventas:{recepcionId:'recepcion_id'},
   recepciones:{costoPresupuesto:'costo_presupuesto', ventaId:'venta_id'},
   compras:{proveedorId:'proveedor_id', productoId:'producto_id'},
-  movimientos:{productoId:'producto_id'}, gastos:{}, proveedores:{}
+  movimientos:{productoId:'producto_id'}, gastos:{}, proveedores:{}, turnos:{}
 };
 const NUMFIELDS = {
   productos:['costo','precio','stock','stockMin'], ventas:['kilometros','recargo','total'],
   recepciones:['costoPresupuesto'], compras:['cantidad','costo'], gastos:['monto'],
-  movimientos:['cantidad'], proveedores:[]
+  movimientos:['cantidad'], proveedores:[], turnos:[]
 };
-const emptyDB = () => ({productos:[],proveedores:[],compras:[],ventas:[],recepciones:[],gastos:[],movimientos:[],usuarios:[]});
+const emptyDB = () => ({productos:[],proveedores:[],compras:[],ventas:[],recepciones:[],gastos:[],movimientos:[],turnos:[],usuarios:[]});
 let DB = emptyDB();
 
 function toRow(t,o){ const fm=FIELDMAP[t]||{}, r={}; for(const k in o){ if(o[k]===undefined)continue; let v=o[k]; if(v==='') v=null; r[fm[k]||k]=v; } return r; }
@@ -77,9 +77,13 @@ async function fetchAllRows(t){
 }
 function backupLocal(){ try{ localStorage.setItem('turbolub_backup', JSON.stringify({at:Date.now(), db:DB})); }catch(e){} }
 
+const OPT_TABLES = ['turnos']; // tablas nuevas: si todavía no existen en la nube, no rompen la carga
 async function loadAll(){
   const fresh={};
-  for(const t of TABLES){ fresh[t] = (await fetchAllRows(t)).map(r=>toApp(t,r)); }
+  for(const t of TABLES){
+    try { fresh[t] = (await fetchAllRows(t)).map(r=>toApp(t,r)); }
+    catch(e){ if(OPT_TABLES.includes(t)){ fresh[t]=[]; console.warn('tabla opcional no disponible:',t); } else throw e; }
+  }
   const perf = await fetchAllRows('perfiles');
   let pend=false;
   for(const t of TABLES){
@@ -282,6 +286,7 @@ const ymNow = () => new Date().toISOString().slice(0,7);
 let gastoMonth = ymNow();
 let cajaMonth  = ymNow();
 let trabMonth  = ymNow();
+let agendaDate = new Date().toISOString().slice(0,10);
 const GASTO_TIPOS = ['Proveedor / Mercadería','Alquiler','Servicios (luz/agua/internet)','Sueldos','Impuestos','Mantenimiento','Gastos chicos','Otros'];
 function monthKey(iso){ return (iso||'').slice(0,7); }
 function fmtMonth(ym){ const [y,m]=ym.split('-'); return MES[+m-1]+' '+y; }
@@ -322,7 +327,7 @@ function animateView(){ const c=$('#content'); if(!c)return; c.classList.remove(
 function render(){
   const el = $('#content');
   if(!canSee(current)) current = firstAllowed();
-  const map = {inicio:viewInicio, ventas:viewVentas, stock:viewStock, recepcion:viewRecepcion, diario:viewDiario, resumen:viewResumen, clientes:viewClientes, trabajos:viewTrabajos, proveedores:viewProveedores, gastos:viewGastos, caja:viewCaja, config:viewConfig};
+  const map = {inicio:viewInicio, ventas:viewVentas, stock:viewStock, recepcion:viewRecepcion, diario:viewDiario, resumen:viewResumen, clientes:viewClientes, trabajos:viewTrabajos, agenda:viewAgenda, proveedores:viewProveedores, gastos:viewGastos, caja:viewCaja, config:viewConfig};
   el.innerHTML = (map[current]||viewInicio)();
   wireView();
   applyPermsNav();
@@ -332,6 +337,9 @@ function render(){
   // badge de turbos en taller sin entregar
   const enTaller = DB.recepciones.filter(r=>!r.entregado).length;
   const rb = $('#recBadge'); if(rb){ rb.textContent = enTaller; rb.classList.toggle('hide', enTaller===0); }
+  // badge de turnos de hoy pendientes
+  const hoyTurnos = (DB.turnos||[]).filter(t=>t.fecha===todayISO() && t.estado!=='cancelado' && t.estado!=='hecho').length;
+  const ab = $('#agendaBadge'); if(ab){ ab.textContent = hoyTurnos; ab.classList.toggle('hide', hoyTurnos===0); }
 }
 
 /* ================= Vistas ================= */
@@ -2288,6 +2296,112 @@ function viewTrabajos(){
     <div class="table-foot"><span>${list.length} trabajo(s) · cobrado ${money(cobrado)} · ganancia ${money(ganancia)}</span></div>
   </div>`;
 }
+
+/* ================= AGENDA / TURNOS ================= */
+function turnosDelDia(f){ return (DB.turnos||[]).filter(t=>t.fecha===f).sort((a,b)=>(a.hora||'~').localeCompare(b.hora||'~')); }
+function capFecha(iso){ const d=new Date(iso+'T00:00:00'); const dias=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado']; return dias[d.getDay()]+' '+d.getDate()+' de '+MES[d.getMonth()]+' '+d.getFullYear(); }
+function tagRubro(r){ if(r==='turbo')return '<span class="tag turbo">Turbos</span>'; if(r==='lubricentro')return '<span class="tag lubri">Lubricentro</span>'; return '<span class="tag">Otros</span>'; }
+function turnoEstadoMeta(e){ return ({pendiente:{txt:'Pendiente',cls:'warn'},confirmado:{txt:'Confirmado',cls:'ok'},hecho:{txt:'Hecho',cls:'ok'},cancelado:{txt:'Cancelado',cls:'off'}})[e]||{txt:'Pendiente',cls:'warn'}; }
+function shiftAgenda(delta){ const d=new Date(agendaDate+'T00:00:00'); d.setDate(d.getDate()+delta); agendaDate=d.toISOString().slice(0,10); render(); }
+function setAgendaDate(v){ agendaDate=v||todayISO(); render(); }
+function rowTurno(t){
+  const est=turnoEstadoMeta(t.estado);
+  const done=t.estado==='hecho'||t.estado==='cancelado';
+  return `<tr${done?' style="opacity:.6"':''}>
+    <td class="mono strong">${t.hora||'—'}</td>
+    <td>${tagRubro(t.rubro)}</td>
+    <td class="cell-name"><div><div class="t">${t.cliente||'—'}</div>${(t.vehiculo||t.patente||t.telefono)?`<div class="sub muted">${[t.vehiculo,t.patente,t.telefono].filter(Boolean).join(' · ')}</div>`:''}</div></td>
+    <td>${t.tipo||'—'}${t.detalle?`<div class="sub muted">${t.detalle}</div>`:''}</td>
+    <td><span class="pill ${est.cls}">${est.txt}</span></td>
+    <td class="right" style="white-space:nowrap">
+      ${t.estado!=='hecho'?`<button class="rowbtn" onclick="turnoHecho('${t.id}')" title="Marcar como hecho">✓</button>`:''}
+      <button class="rowbtn" onclick="openTurno('${t.id}')">Editar</button>
+      <button class="rowbtn del" onclick="delTurno('${t.id}')">✕</button>
+    </td>
+  </tr>`;
+}
+function viewAgenda(){
+  const f=agendaDate, list=turnosDelDia(f), esHoy=f===todayISO();
+  const prox=(DB.turnos||[]).filter(t=>t.fecha>f && t.estado!=='cancelado' && t.estado!=='hecho')
+    .sort((a,b)=>(a.fecha+(a.hora||'')).localeCompare(b.fecha+(b.hora||''))).slice(0,12);
+  return `
+  <div class="page-head">
+    <div><h1>Agenda</h1><p>Turnos de lubricentro, turbos y otros trabajos</p></div>
+    <div class="actions"><button class="btn primary" onclick="openTurno()">＋ Nuevo turno</button></div>
+  </div>
+  <div class="panel">
+    <div class="panel-tools" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn sm" onclick="shiftAgenda(-1)" title="Día anterior">‹</button>
+      <input type="date" class="btn" style="font-weight:600" value="${f}" onchange="setAgendaDate(this.value)">
+      <button class="btn sm" onclick="shiftAgenda(1)" title="Día siguiente">›</button>
+      <button class="btn sm ${esHoy?'primary':''}" onclick="setAgendaDate('${todayISO()}')">Hoy</button>
+      <strong style="margin-left:auto">${capFecha(f)} · ${list.length} turno(s)</strong>
+    </div>
+    <table>
+      <thead><tr><th>Hora</th><th>Rubro</th><th>Cliente / Vehículo</th><th>Trabajo</th><th>Estado</th><th></th></tr></thead>
+      <tbody>${list.length?list.map(rowTurno).join(''):`<tr><td colspan="6"><div class="empty"><div class="big">📅</div>Sin turnos para este día.<br><button class="btn primary sm" style="margin-top:12px" onclick="openTurno()">＋ Agendar turno</button></div></td></tr>`}</tbody>
+    </table>
+  </div>
+  ${prox.length?`<div class="panel" style="margin-top:16px">
+    <div class="panel-tools"><strong>Próximos turnos</strong></div>
+    <table><thead><tr><th>Fecha</th><th>Hora</th><th>Rubro</th><th>Cliente / Vehículo</th><th>Trabajo</th><th></th></tr></thead>
+    <tbody>${prox.map(t=>`<tr>
+      <td class="mono">${fmtDate(t.fecha)}</td><td class="mono">${t.hora||'—'}</td>
+      <td>${tagRubro(t.rubro)}</td>
+      <td>${t.cliente||'—'}${(t.vehiculo||t.patente)?`<div class="sub muted">${[t.vehiculo,t.patente].filter(Boolean).join(' · ')}</div>`:''}</td>
+      <td class="muted">${t.tipo||'—'}</td>
+      <td class="right"><button class="rowbtn" onclick="setAgendaDate('${t.fecha}')">Ver día</button></td>
+    </tr>`).join('')}</tbody></table>
+  </div>`:''}`;
+}
+function openTurno(id){
+  const t=id?DB.turnos.find(x=>x.id===id):null;
+  const e=t||{fecha:agendaDate,hora:'',rubro:'lubricentro',tipo:'',cliente:'',telefono:'',vehiculo:'',patente:'',detalle:'',estado:'pendiente'};
+  $('#modalRoot').innerHTML=`
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head"><div><h2>${t?'Editar turno':'Nuevo turno'}</h2><p>Agendá un turno de trabajo</p></div>
+      <button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="t-id" value="${t?t.id:''}">
+      <div class="grid3">
+        <div class="field"><label>Fecha *</label><input type="date" id="t-fecha" value="${e.fecha||agendaDate}"></div>
+        <div class="field"><label>Hora</label><input type="time" id="t-hora" value="${e.hora||''}"></div>
+        <div class="field"><label>Rubro</label><select id="t-rubro">${[['lubricentro','Lubricentro'],['turbo','Turbos'],['otros','Otros']].map(([v,l])=>`<option value="${v}" ${e.rubro===v?'selected':''}>${l}</option>`).join('')}</select></div>
+      </div>
+      <div class="field"><label>Trabajo a realizar</label><input id="t-tipo" value="${(e.tipo||'').replace(/"/g,'&quot;')}" placeholder="Ej: Cambio de aceite, cambio de turbo, frenos…"></div>
+      <div class="grid3">
+        <div class="field"><label>Cliente</label><input id="t-cliente" value="${(e.cliente||'').replace(/"/g,'&quot;')}" placeholder="Nombre"></div>
+        <div class="field"><label>Teléfono</label><input id="t-telefono" value="${(e.telefono||'').replace(/"/g,'&quot;')}" placeholder="351-…"></div>
+        <div class="field"><label>Patente</label><input id="t-patente" value="${e.patente||''}" placeholder="AB123CD" style="text-transform:uppercase"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Vehículo</label><input id="t-vehiculo" value="${(e.vehiculo||'').replace(/"/g,'&quot;')}" placeholder="Ej: VW Amarok 2018"></div>
+        <div class="field"><label>Estado</label><select id="t-estado">${[['pendiente','Pendiente'],['confirmado','Confirmado'],['hecho','Hecho'],['cancelado','Cancelado']].map(([v,l])=>`<option value="${v}" ${e.estado===v?'selected':''}>${l}</option>`).join('')}</select></div>
+      </div>
+      <div class="field"><label>Notas</label><textarea id="t-detalle" rows="2" placeholder="Observaciones…">${e.detalle||''}</textarea></div>
+    </div>
+    <div class="modal-foot">
+      ${t?`<button class="btn danger" style="margin-right:auto" onclick="delTurno('${t.id}')">Eliminar</button>`:''}
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="saveTurno()">${t?'Guardar cambios':'Agendar turno'}</button>
+    </div>
+  </div>`;
+  showModal();
+}
+function saveTurno(){
+  const fecha=$('#t-fecha').value;
+  if(!fecha){ toast('Elegí la fecha del turno.'); return; }
+  const data={ fecha, hora:$('#t-hora').value||'', rubro:$('#t-rubro').value, tipo:$('#t-tipo').value.trim(),
+    cliente:$('#t-cliente').value.trim(), telefono:$('#t-telefono').value.trim(),
+    vehiculo:$('#t-vehiculo').value.trim(), patente:$('#t-patente').value.trim().toUpperCase(),
+    detalle:$('#t-detalle').value.trim(), estado:$('#t-estado').value };
+  const id=$('#t-id').value;
+  if(id){ const t=DB.turnos.find(x=>x.id===id); if(t) Object.assign(t,data); }
+  else { DB.turnos.push({id:uid(),...data}); }
+  agendaDate=fecha; save(); closeModal(); render(); toast('✅ Turno agendado');
+}
+function turnoHecho(id){ const t=DB.turnos.find(x=>x.id===id); if(t){ t.estado='hecho'; save(); render(); toast('✅ Turno marcado como hecho'); } }
+function delTurno(id){ if(!confirm('¿Eliminar este turno?'))return; DB.turnos=DB.turnos.filter(x=>x.id!==id); save(); closeModal(); render(); toast('Turno eliminado'); }
 
 /* ================= Modal: PROVEEDOR ================= */
 function openProveedor(id){
