@@ -2072,49 +2072,62 @@ function matchInsumoProd(it){
 function auditServices(){
   const pend=DB.ventas.filter(v=>v.tipo==='service'&&!svcDescontado(v));
   const porProd={}, noMatch={};
-  pend.forEach(v=>(v.insumos||[]).forEach(it=>{
-    const c=+it.cantidad||0; if(c<=0) return;
-    const p=matchInsumoProd(it);
-    if(p){ (porProd[p.id]=porProd[p.id]||{p,usado:0}).usado+=c; }
-    else { const k=(it.nombre||'?').trim()||'?'; (noMatch[k]=noMatch[k]||{nombre:k,usado:0}).usado+=c; }
-  }));
+  pend.forEach(v=>{ const rec=(v.items&&v.items[0]&&v.items[0].recProds)||[];
+    (v.insumos||[]).forEach(it=>{
+      const c=+it.cantidad||0; if(c<=0) return;
+      const p=matchInsumoProd(it);
+      if(p){ if(rec.includes(p.id)) return; (porProd[p.id]=porProd[p.id]||{p,usado:0}).usado+=c; }
+      else { const k=(it.nombre||'?').trim()||'?'; (noMatch[k]=noMatch[k]||{nombre:k,usado:0}).usado+=c; }
+    });
+  });
   return {pend, porProd:Object.values(porProd).sort((a,b)=>b.usado-a.usado), noMatch:Object.values(noMatch).sort((a,b)=>b.usado-a.usado)};
 }
+function auditToggleAll(cb){ document.querySelectorAll('.audit-cb').forEach(x=>x.checked=cb.checked); auditCount(); }
+function auditCount(){ const n=document.querySelectorAll('.audit-cb:checked').length; const b=$('#auditApplyBtn'); if(b){ b.textContent='Corregir '+n+' seleccionado(s)'; b.disabled=n===0; } }
 function openAuditServices(){
   const a=auditServices();
   $('#modalRoot').innerHTML=`
-  <div class="modal" style="max-width:660px">
-    <div class="modal-head"><div><h2>🔧 Corregir stock de services</h2><p>Descontar insumos de services que no se descontaron</p></div>
+  <div class="modal" style="max-width:680px">
+    <div class="modal-head"><div><h2>🔧 Corregir stock de services</h2><p>Tildá los productos que querés corregir</p></div>
       <button class="x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <p class="qty-hint">Hay <b>${a.pend.length}</b> service(s) sin marcar como descontados. Abajo ves cuánto se restaría de cada producto. <b>Revisá que la columna "Quedaría" tenga sentido</b> (si te da negativo o muy bajo, es que ese producto ya se había descontado — no apliques).</p>
+      <p class="qty-hint">Hay <b>${a.pend.length}</b> service(s) con insumos sin descontar. <b>Tildá solo los productos que querés corregir.</b> Mirá "Quedaría": si te da negativo o muy bajo, ese ya estaba descontado → no lo tildes.</p>
       ${a.porProd.length?`
-      <div style="overflow:auto;max-height:320px;border:1px solid var(--line);border-radius:10px">
-      <table><thead><tr><th>Producto</th><th class="right">Usado</th><th class="right">Stock hoy</th><th class="right">Quedaría</th></tr></thead>
+      <div style="overflow:auto;max-height:340px;border:1px solid var(--line);border-radius:10px">
+      <table><thead><tr>
+        <th style="width:34px"><input type="checkbox" onclick="auditToggleAll(this)" title="Seleccionar todos"></th>
+        <th>Producto</th><th class="right">Usado</th><th class="right">Stock hoy</th><th class="right">Quedaría</th></tr></thead>
       <tbody>${a.porProd.map(c=>{const nuevo=+(c.p.stock-c.usado).toFixed(3);return `
-        <tr><td>${c.p.nombre}${c.p.sku&&c.p.sku!==c.p.nombre?` <span class="muted mono">${c.p.sku}</span>`:''}</td>
+        <tr><td style="text-align:center"><input type="checkbox" class="audit-cb" data-pid="${c.p.id}" onclick="auditCount()"></td>
+        <td>${c.p.nombre}${c.p.sku&&c.p.sku!==c.p.nombre?` <span class="muted mono">${c.p.sku}</span>`:''}</td>
         <td class="right mono">${num(c.usado)}</td><td class="right mono">${num(c.p.stock)}</td>
         <td class="right strong mono" style="color:${nuevo<0?'var(--red)':'var(--green)'}">${num(nuevo)}</td></tr>`;}).join('')}</tbody></table></div>`
-      :'<p class="muted">No hay insumos identificables para descontar.</p>'}
+      :'<p class="muted">No hay insumos identificables para descontar. 🎉</p>'}
       ${a.noMatch.length?`<div style="margin-top:14px"><strong style="color:var(--red)">⚠️ Insumos que NO coinciden con ningún producto (${a.noMatch.length})</strong>
         <p class="qty-hint">Estos se escribieron a mano y no se pueden descontar solos. Buscá el producto en Stock y ajustalo vos:</p>
         <ul style="margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13px;max-height:150px;overflow:auto">${a.noMatch.slice(0,60).map(n=>`<li>${n.nombre} — usado ${num(n.usado)}</li>`).join('')}</ul></div>`:''}
-      <p class="qty-hint" style="margin-top:14px">⚠️ Aplicalo <b>una sola vez</b>. Los services quedan marcados como descontados y no se vuelven a contar.</p>
+      <p class="qty-hint" style="margin-top:14px">💡 Podés corregir de a poco: los productos que ya corregiste quedan marcados y no se vuelven a contar.</p>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal()">Cancelar</button>
-      ${a.porProd.length?`<button class="btn primary" onclick="applyAuditServices()">Aplicar descuento a ${a.porProd.length} producto(s)</button>`:''}
+      ${a.porProd.length?`<button class="btn primary" id="auditApplyBtn" disabled onclick="applyAuditServices()">Corregir 0 seleccionado(s)</button>`:''}
     </div>
   </div>`;
   showModal();
 }
 function applyAuditServices(){
+  const sel=new Set([...document.querySelectorAll('.audit-cb:checked')].map(cb=>cb.dataset.pid));
+  if(!sel.size){ toast('No seleccionaste ningún producto.'); return; }
   const a=auditServices();
-  if(!a.porProd.length){ closeModal(); return; }
-  if(!confirm('Se va a descontar el stock de '+a.porProd.length+' producto(s) según los insumos de '+a.pend.length+' service(s).\n\n¿Estás segura? (revisá antes la columna "Quedaría")')) return;
-  a.porProd.forEach(c=>{ c.p.stock=+(c.p.stock-c.usado).toFixed(3); });
-  a.pend.forEach(v=>{ if(v.items&&v.items[0]) v.items[0].descontado=true; });
-  save(); closeModal(); render(); toast('✅ Stock corregido en '+a.porProd.length+' producto(s)');
+  const chosen=a.porProd.filter(c=>sel.has(c.p.id));
+  if(!chosen.length){ closeModal(); return; }
+  if(!confirm('Se va a corregir el stock de '+chosen.length+' producto(s) seleccionado(s). ¿Confirmás?')) return;
+  chosen.forEach(c=>{ c.p.stock=+(c.p.stock-c.usado).toFixed(3); });
+  // marca por producto en cada service (así podés seguir corrigiendo otros después)
+  a.pend.forEach(v=>{ if(!v.items||!v.items[0]) return;
+    (v.insumos||[]).forEach(it=>{ const p=matchInsumoProd(it); if(p&&sel.has(p.id)){ const arr=v.items[0].recProds||(v.items[0].recProds=[]); if(!arr.includes(p.id)) arr.push(p.id); } });
+  });
+  save(); closeModal(); render(); toast('✅ Stock corregido en '+chosen.length+' producto(s)');
 }
 
 /* ================= OTROS TRABAJOS (frenos, distribución, etc.) ================= */
