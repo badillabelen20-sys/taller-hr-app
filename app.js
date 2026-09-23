@@ -611,6 +611,7 @@ function viewStock(){
     <div><h1>Control de Stock</h1><p>${vend?'Consultá precios y disponibilidad':'Gestioná inventario, precios y disponibilidad de repuestos e insumos'}</p></div>
     <div class="actions">
       ${vend?'':`<button class="btn" onclick="exportCSV('stock')">⭳ Exportar</button>
+      <button class="btn" onclick="openImport()">⭱ Importar factura</button>
       <button class="btn primary" onclick="openProduct()">＋ Agregar producto</button>`}
     </div>
   </div>
@@ -2308,6 +2309,93 @@ function viewTrabajos(){
     </table>
     <div class="table-foot"><span>${list.length} trabajo(s) · cobrado ${money(cobrado)} · ganancia ${money(ganancia)}</span></div>
   </div>`;
+}
+
+/* ================= IMPORTAR PRODUCTOS DESDE FACTURA ================= */
+let importRows=[];
+function parseArNum(s){ s=String(s==null?'':s).trim().replace(/[^\d.,-]/g,''); if(!s) return 0;
+  if(s.includes('.')&&s.includes(',')) s=s.replace(/\./g,'').replace(',','.');
+  else if(s.includes(',')) s=s.replace(',','.');
+  return parseFloat(s)||0; }
+function importTipoFiltro(code){ const c=(code||'').toUpperCase();
+  if(c.startsWith('WL')) return 'Filtro de aceite';
+  if(c.startsWith('WF')) return 'Filtro de combustible';
+  if(c.startsWith('WA')) return 'Filtro de aire';
+  if(c.startsWith('WP')) return 'Filtro de habitáculo';
+  return ''; }
+function openImport(){
+  importRows=[];
+  $('#modalRoot').innerHTML=`
+  <div class="modal" style="max-width:840px">
+    <div class="modal-head"><div><h2>⭱ Importar factura</h2><p>Pegá las filas de la factura y cargá el stock todo junto</p></div>
+      <button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="grid3">
+        <div class="field"><label>Rubro</label><select id="im-rubro">${[['lubricentro','Lubricentro'],['turbo','Turbos']].map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
+        <div class="field"><label>% Ganancia</label><input type="number" id="im-gan" value="60" min="0" step="any"></div>
+        <div class="field"><label>Tipo (si no es filtro Wix)</label><input id="im-tipo" placeholder="Ej: Filtro"></div>
+      </div>
+      <label class="remember" style="margin:2px 0 10px"><input type="checkbox" id="im-iva" checked> El precio de la factura es SIN IVA → sumarle 21% al costo</label>
+      <div class="field"><label>Pegá las filas — formato por línea: <b>código | descripción | cantidad | precio unitario</b></label>
+        <textarea id="im-text" rows="7" placeholder="WL7070 | W719/5 REEMP A WL10162 | 3 | 6390.45
+WF36010 | WK613/3 VW GOL 1.6 | 6 | 5510.65" style="font-family:monospace;font-size:12px;width:100%;box-sizing:border-box"></textarea></div>
+      <button class="btn" onclick="parseImport()">👁️ Ver vista previa</button>
+      <div id="im-preview" style="margin-top:12px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" id="im-apply" disabled onclick="confirmImport()">Cargar productos</button>
+    </div>
+  </div>`;
+  showModal();
+}
+function parseImport(){
+  const rubro=$('#im-rubro').value, gan=+$('#im-gan').value||0, tipoDef=$('#im-tipo').value.trim(), addIva=$('#im-iva').checked;
+  const lines=$('#im-text').value.split('\n').map(l=>l.trim()).filter(Boolean);
+  importRows=[];
+  lines.forEach(l=>{
+    const parts=l.split(/\t|\||;/).map(s=>s.trim());
+    if(parts.length<4) return;
+    const code=parts[0], desc=parts[1], cant=parts[2], prec=parts[3];
+    const sku=code.replace(/\(.*?\)/g,'').trim();
+    if(!sku) return;
+    const cantidad=parseArNum(cant);
+    const base=parseArNum(prec);
+    const costo=+(addIva?base*1.21:base).toFixed(2);
+    const venta=round10(costo*1.21*(1+gan/100));
+    const tipo=importTipoFiltro(sku)||tipoDef||'Filtro';
+    const nombre=(desc||sku).trim();
+    const exist=DB.productos.find(p=>p.sku&&p.sku.toLowerCase()===sku.toLowerCase());
+    importRows.push({sku,nombre,tipo,rubro,cantidad,costo,venta,exist:!!exist,existId:exist?exist.id:null});
+  });
+  renderImportPreview();
+}
+function renderImportPreview(){
+  const box=$('#im-preview'); if(!box) return;
+  const btn=$('#im-apply');
+  if(!importRows.length){ box.innerHTML='<p class="muted">No se detectaron filas válidas. Revisá que cada línea tenga 4 columnas separadas por <b>|</b></p>'; if(btn)btn.disabled=true; return; }
+  const nuevos=importRows.filter(r=>!r.exist).length, upd=importRows.length-nuevos;
+  box.innerHTML=`
+    <p class="qty-hint"><b>${importRows.length}</b> productos · <b>${nuevos}</b> nuevos · <b>${upd}</b> ya existen (se suma la cantidad al stock y se actualiza el costo/precio)</p>
+    <div style="overflow:auto;max-height:300px;border:1px solid var(--line);border-radius:10px">
+    <table><thead><tr><th>Código</th><th>Descripción</th><th>Tipo</th><th class="right">Cant</th><th class="right">Costo</th><th class="right">Venta</th><th></th></tr></thead>
+    <tbody>${importRows.map(r=>`<tr>
+      <td class="mono">${r.sku}</td><td>${r.nombre}</td><td><span class="muted">${r.tipo}</span></td>
+      <td class="right mono">${num(r.cantidad)}</td><td class="right mono">${money(r.costo)}</td>
+      <td class="right strong mono">${money(r.venta)}</td>
+      <td>${r.exist?'<span class="pill warn">actualiza</span>':'<span class="pill ok">nuevo</span>'}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+  if(btn)btn.disabled=false;
+}
+function confirmImport(){
+  if(!importRows.length){ toast('No hay filas para cargar.'); return; }
+  if(!confirm('Se van a cargar/actualizar '+importRows.length+' productos. ¿Confirmás?')) return;
+  let creados=0, actualizados=0;
+  importRows.forEach(r=>{
+    if(r.exist){ const p=DB.productos.find(x=>x.id===r.existId); if(p){ p.stock=+(((+p.stock||0)+r.cantidad).toFixed(3)); p.costo=r.costo; p.precio=r.venta; if(!p.tipo||p.tipo==='Filtro')p.tipo=r.tipo; actualizados++; } }
+    else { DB.productos.push({id:uid(),nombre:r.nombre,sku:r.sku,rubro:r.rubro,tipo:r.tipo,costo:r.costo,precio:r.venta,stock:r.cantidad,stockMin:0}); creados++; }
+  });
+  save(); closeModal(); go('stock'); toast('✅ Importado: '+creados+' nuevos · '+actualizados+' actualizados');
 }
 
 /* ================= AGENDA / TURNOS ================= */
